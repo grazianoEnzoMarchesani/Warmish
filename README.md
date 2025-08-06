@@ -1,5 +1,3 @@
-# Warmish
-
 <div align="center">
   <img src="Warmish Logo.png" alt="Warmish Logo" width="250">
   <h1>Warmish</h1>
