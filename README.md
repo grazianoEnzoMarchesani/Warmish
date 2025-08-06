@@ -1,3 +1,11 @@
+<div align="center">
+  <img src="Warmish logo.png" alt="Warmish Logo" width="250">
+  <h1>Warmish</h1>
+  <p><em>Professional GUI application for thermal image analysis and visualization</em></p>
+</div>
+
+---
+
 # Warmish
 
 **Warmish** is a graphical, cross-platform thermal image analysis tool. It enables the extraction, processing, and visualization of radiometric metadata and temperature maps from FLIR thermal images. With an intuitive interface and robust computational backend, Warmish transforms raw data into clear thermal visualizations and provides interactive exploration of temperature information at the pixel level.
