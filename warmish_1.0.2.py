@@ -85,25 +85,24 @@ class ThermalAnalyzerNG(QMainWindow):
         self.palette_combo.setToolTip("Seleziona palette termica")
         self.toolbar.addWidget(self.palette_combo)
         # Pulsante per invertire la palette
-        self.btn_invert_palette = QPushButton("Inverti Palette")
-        self.btn_invert_palette.setToolTip("Inverti i colori della palette selezionata")
-        self.btn_invert_palette.clicked.connect(self.on_invert_palette)
-        self.toolbar.addWidget(self.btn_invert_palette)
+        self.action_invert_palette = QAction("Inverti Palette", self)
+        self.action_invert_palette.triggered.connect(self.on_invert_palette)
+        self.toolbar.addAction(self.action_invert_palette)
         self.toolbar.addSeparator()
         # --- Zoom Controls ---
         self.zoom_factor = 1.0
         self.pan_offset = [0, 0]
         self._panning = False
         self._pan_start = None
-        self.btn_zoom_in = QPushButton("Zoom +")
-        self.btn_zoom_out = QPushButton("Zoom -")
-        self.btn_zoom_reset = QPushButton("Reset Zoom")
-        self.btn_zoom_in.clicked.connect(self.zoom_in)
-        self.btn_zoom_out.clicked.connect(self.zoom_out)
-        self.btn_zoom_reset.clicked.connect(self.zoom_reset)
-        self.toolbar.addWidget(self.btn_zoom_in)
-        self.toolbar.addWidget(self.btn_zoom_out)
-        self.toolbar.addWidget(self.btn_zoom_reset)
+        self.action_zoom_in = QAction("Zoom +", self)
+        self.action_zoom_in.triggered.connect(self.zoom_in)
+        self.toolbar.addAction(self.action_zoom_in)
+        self.action_zoom_out = QAction("Zoom -", self)
+        self.action_zoom_out.triggered.connect(self.zoom_out)
+        self.toolbar.addAction(self.action_zoom_out)
+        self.action_zoom_reset = QAction("Reset Zoom", self)
+        self.action_zoom_reset.triggered.connect(self.zoom_reset)
+        self.toolbar.addAction(self.action_zoom_reset)
         self.toolbar.addSeparator()
         # Strumenti di disegno (placeholder)
         self.action_spot = QAction("Spot", self)
