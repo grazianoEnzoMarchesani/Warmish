@@ -216,4 +216,4 @@ See the [LICENSE](LICENSE) file for more details.
 
 ## Contribution
 
-Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Issues and pull requests are welcome.
