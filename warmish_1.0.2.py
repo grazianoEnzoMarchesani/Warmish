@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QVBoxLayout, QHBoxLayout, QWidget,
     QFileDialog, QMessageBox, QTextEdit, QSizePolicy, QLineEdit, QFormLayout,
     QGroupBox, QTabWidget, QToolBar, QComboBox, QSizePolicy as QSP,
-    QCheckBox, QPushButton
+    QCheckBox, QPushButton, QSlider, QDoubleSpinBox, QSpinBox
 )
 from PySide6.QtGui import QAction
 from PySide6.QtGui import QPixmap, QImage, QIcon
@@ -37,19 +37,19 @@ PALETTE_MAP = {
     "Jet": cm.jet,
     "Fire": cm.afmhot,
     "Ice": cm.winter,
-    "Spring": cm.spring,
+    "Spring": cm.spring_r,
     "Summer": cm.summer,
     "Autumn": cm.autumn,
     "Bone": cm.bone,
     "Pink": cm.pink,
     "Coolwarm": cm.coolwarm,
-    "RdYlBu": cm.RdYlBu,
-    "Spectral": cm.Spectral,
-    "BrBG": cm.BrBG,
-    "PiYG": cm.PiYG,
-    "PRGn": cm.PRGn,
-    "RdBu": cm.RdBu,
-    "RdGy": cm.RdGy,
+    "RdYlBu": cm.RdYlBu_r,
+    "Spectral": cm.Spectral_r,
+    "BrBG": cm.BrBG_r,
+    "PiYG": cm.PiYG_r,
+    "PRGn": cm.PRGn_r,
+    "RdBu": cm.RdBu_r,
+    "RdGy": cm.RdGy_r,
     "Purples": cm.Purples,
     "Blues": cm.Blues,
     "Greens": cm.Greens,
@@ -88,6 +88,49 @@ class ThermalAnalyzerNG(QMainWindow):
         self.action_invert_palette = QAction("Inverti Palette", self)
         self.action_invert_palette.triggered.connect(self.on_invert_palette)
         self.toolbar.addAction(self.action_invert_palette)
+        self.toolbar.addSeparator()
+        # --- Overlay Controls ---
+        self.action_overlay_view = QAction("Overlay", self)
+        self.action_overlay_view.setCheckable(True)
+        self.action_overlay_view.toggled.connect(self.on_overlay_toggled)
+        self.toolbar.addAction(self.action_overlay_view)
+        self.overlay_alpha_slider = QSlider(Qt.Horizontal)
+        self.overlay_alpha_slider.setRange(0, 100)
+        self.overlay_alpha_slider.setValue(50)
+        self.overlay_alpha_slider.setToolTip("Opacità termica in overlay")
+        self.overlay_alpha_slider.valueChanged.connect(self.on_overlay_alpha_changed)
+        self.toolbar.addWidget(self.overlay_alpha_slider)
+        # Spinbox scala manuale
+        self.scale_spin = QDoubleSpinBox()
+        self.scale_spin.setDecimals(3)
+        self.scale_spin.setRange(0.100, 5.000)
+        self.scale_spin.setSingleStep(0.01)
+        self.scale_spin.setPrefix("Scala ")
+        self.scale_spin.setValue(1.0)
+        self.scale_spin.setToolTip("Scala IR rispetto al visibile (Real2IR)")
+        self.scale_spin.valueChanged.connect(self.on_scale_spin_changed)
+        self.toolbar.addWidget(self.scale_spin)
+        # Spinbox offset manuali (in pixel visibile)
+        self.offsetx_spin = QSpinBox()
+        self.offsetx_spin.setRange(-2000, 2000)
+        self.offsetx_spin.setSingleStep(1)
+        self.offsetx_spin.setPrefix("OffX ")
+        self.offsetx_spin.setToolTip("Offset X (pixel visibile)")
+        self.offsetx_spin.valueChanged.connect(self.on_offsetx_changed)
+        self.toolbar.addWidget(self.offsetx_spin)
+
+        self.offsety_spin = QSpinBox()
+        self.offsety_spin.setRange(-2000, 2000)
+        self.offsety_spin.setSingleStep(1)
+        self.offsety_spin.setPrefix("OffY ")
+        self.offsety_spin.setToolTip("Offset Y (pixel visibile)")
+        self.offsety_spin.valueChanged.connect(self.on_offsety_changed)
+        self.toolbar.addWidget(self.offsety_spin)
+        # Pulsante reset allineamento
+        self.action_reset_align = QAction("Reset Allineamento", self)
+        self.action_reset_align.setToolTip("Ripristina Scala e Offset da metadati")
+        self.action_reset_align.triggered.connect(self.on_reset_alignment)
+        self.toolbar.addAction(self.action_reset_align)
         self.toolbar.addSeparator()
         # --- Zoom Controls ---
         self.zoom_factor = 1.0
@@ -279,6 +322,16 @@ class ThermalAnalyzerNG(QMainWindow):
         self.selected_palette = "Iron"
         self.palette_inverted = False  # Stato inversione palette
         self.palette_combo.currentIndexChanged.connect(self.on_palette_changed)
+        # Overlay state
+        self.overlay_mode = False
+        self.overlay_alpha = 0.5
+        self.overlay_scale = 1.0
+        self.visible_gray_full = None
+        self.overlay_offset_x = 0.0
+        self.overlay_offset_y = 0.0
+        self.meta_overlay_scale = 1.0
+        self.meta_offset_x = 0.0
+        self.meta_offset_y = 0.0
 
     def open_image(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleziona Immagine FLIR", "", "Immagini JPEG (*.jpg *.jpeg)")
@@ -290,6 +343,38 @@ class ThermalAnalyzerNG(QMainWindow):
                 json_string = et.execute(b"-json", file_path.encode())
                 self.metadata = json.loads(json_string)[0]
                 self.all_meta_display.setPlainText(json.dumps(self.metadata, indent=4, default=str))
+                # Imposta scala overlay direttamente dai metadati, se disponibile
+                try:
+                    self.meta_overlay_scale = 1/float(self.metadata.get("APP1:Real2IR", 1.0))
+                    self.overlay_scale = self.meta_overlay_scale
+                except Exception:
+                    self.meta_overlay_scale = 1.0
+                    self.overlay_scale = 1.0
+                # Imposta offset overlay (in pixel visibile)
+                try:
+                    self.meta_offset_x = float(self.metadata.get("APP1:OffsetX", 0.0))
+                    self.overlay_offset_x = self.meta_offset_x
+                except Exception:
+                    self.meta_offset_x = 0.0
+                    self.overlay_offset_x = 0.0
+                try:
+                    self.meta_offset_y = float(self.metadata.get("APP1:OffsetY", 0.0))
+                    self.overlay_offset_y = self.meta_offset_y
+                except Exception:
+                    self.meta_offset_y = 0.0
+                    self.overlay_offset_y = 0.0
+                # Aggiorna lo spinbox con la scala
+                try:
+                    self.scale_spin.blockSignals(True)
+                    self.scale_spin.setValue(self.overlay_scale)
+                    self.offsetx_spin.blockSignals(True)
+                    self.offsetx_spin.setValue(int(round(self.overlay_offset_x)))
+                    self.offsety_spin.blockSignals(True)
+                    self.offsety_spin.setValue(int(round(self.overlay_offset_y)))
+                finally:
+                    self.scale_spin.blockSignals(False)
+                    self.offsetx_spin.blockSignals(False)
+                    self.offsety_spin.blockSignals(False)
             
             self.populate_params()
 
@@ -330,11 +415,14 @@ class ThermalAnalyzerNG(QMainWindow):
             if rgb_bytes:
                 image_rgb = Image.open(io.BytesIO(rgb_bytes))
                 image_rgb = image_rgb.convert("RGB")
+                # Salva anche versione grayscale per auto-allineamento
+                self.visible_gray_full = np.array(image_rgb.convert("L"), dtype=np.float32) / 255.0
                 data = image_rgb.tobytes("raw", "RGB")
                 qimage = QImage(data, image_rgb.width, image_rgb.height, QImage.Format_RGB888)
                 pixmap = QPixmap.fromImage(qimage)
                 self.base_pixmap_visible = pixmap  # <--- SALVA LA PIXMAP ORIGINALE
-                self.display_secondary_image()     # <--- AGGIUNGI QUESTO PER AGGIORNARE LA VISTA
+                # Scala overlay già impostata da metadati; aggiorna la vista
+                self.display_images()
             else:
                 self.secondary_image_label.setText("Nessuna immagine visibile trovata.")
         except Exception as e:
@@ -489,11 +577,44 @@ class ThermalAnalyzerNG(QMainWindow):
             pos = event.position()
             label_size = self.image_label.size()
             target_size = label_size * self.zoom_factor
-            pixmap_width = int(target_size.width())
-            pixmap_height = int(target_size.height())
 
-            offset_x = (label_size.width() - pixmap_width) // 2 + int(self.pan_offset[0])
-            offset_y = (label_size.height() - pixmap_height) // 2 + int(self.pan_offset[1])
+            # Se overlay attivo, usa le dimensioni della termica in overlay e includi offset
+            if self.overlay_mode:
+                thr_pixmap = self.base_pixmap.scaled(
+                    int(target_size.width() * self.overlay_scale),
+                    int(target_size.height() * self.overlay_scale),
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation
+                ) if self.base_pixmap is not None else None
+                if thr_pixmap is None:
+                    self.temp_tooltip_label.setVisible(False)
+                    return
+                if self.base_pixmap_visible is not None:
+                    vis_pixmap = self.base_pixmap_visible.scaled(
+                        int(target_size.width()), int(target_size.height()),
+                        Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    )
+                    x_vis = (label_size.width() - vis_pixmap.width()) // 2 + int(self.pan_offset[0])
+                    y_vis = (label_size.height() - vis_pixmap.height()) // 2 + int(self.pan_offset[1])
+                    base_vis_w = self.base_pixmap_visible.width()
+                    base_vis_h = self.base_pixmap_visible.height()
+                    scale_vx = vis_pixmap.width() / base_vis_w if base_vis_w else 1.0
+                    scale_vy = vis_pixmap.height() / base_vis_h if base_vis_h else 1.0
+                    ox = int(round(self.overlay_offset_x * scale_vx))
+                    oy = int(round(self.overlay_offset_y * scale_vy))
+                    pixmap_width = thr_pixmap.width()
+                    pixmap_height = thr_pixmap.height()
+                    offset_x = x_vis + (vis_pixmap.width() - pixmap_width) // 2 + ox
+                    offset_y = y_vis + (vis_pixmap.height() - pixmap_height) // 2 + oy
+                else:
+                    pixmap_width = thr_pixmap.width()
+                    pixmap_height = thr_pixmap.height()
+                    offset_x = (label_size.width() - pixmap_width) // 2 + int(self.pan_offset[0])
+                    offset_y = (label_size.height() - pixmap_height) // 2 + int(self.pan_offset[1])
+            else:
+                pixmap_width = int(target_size.width())
+                pixmap_height = int(target_size.height())
+                offset_x = (label_size.width() - pixmap_width) // 2 + int(self.pan_offset[0])
+                offset_y = (label_size.height() - pixmap_height) // 2 + int(self.pan_offset[1])
 
             pix_x = pos.x() - offset_x
             pix_y = pos.y() - offset_y
@@ -530,8 +651,13 @@ class ThermalAnalyzerNG(QMainWindow):
         self.display_images()
 
     def display_images(self):
-        self.display_thermal_image()
-        self.display_secondary_image()
+        if self.overlay_mode and self.base_pixmap_visible is not None:
+            self.display_overlay_image()
+            self.secondary_image_label.setVisible(False)
+        else:
+            self.display_thermal_image()
+            self.display_secondary_image()
+            self.secondary_image_label.setVisible(True)
 
     def display_thermal_image(self):
         if self.base_pixmap is None:
@@ -549,6 +675,58 @@ class ThermalAnalyzerNG(QMainWindow):
         x = (self.image_label.width() - pixmap.width()) // 2 + int(self.pan_offset[0])
         y = (self.image_label.height() - pixmap.height()) // 2 + int(self.pan_offset[1])
         painter.drawPixmap(x, y, pixmap)
+        painter.end()
+        self.image_label.setPixmap(canvas)
+
+    def display_overlay_image(self):
+        if self.base_pixmap is None and self.base_pixmap_visible is None:
+            return
+        target_size = self.image_label.size() * self.zoom_factor
+        # Visibile come base
+        if self.base_pixmap_visible is not None:
+            vis_pixmap = self.base_pixmap_visible.scaled(
+                int(target_size.width()), int(target_size.height()),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+        else:
+            vis_pixmap = None
+        # Termica come overlay con scala relativa
+        if self.base_pixmap is not None:
+            thr_pixmap = self.base_pixmap.scaled(
+                int(target_size.width() * self.overlay_scale),
+                int(target_size.height() * self.overlay_scale),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+        else:
+            thr_pixmap = None
+
+        canvas = QPixmap(self.image_label.size())
+        canvas.fill(Qt.transparent)
+        painter = QPainter(canvas)
+
+        if vis_pixmap is not None:
+            x_vis = (self.image_label.width() - vis_pixmap.width()) // 2 + int(self.pan_offset[0])
+            y_vis = (self.image_label.height() - vis_pixmap.height()) // 2 + int(self.pan_offset[1])
+            painter.drawPixmap(x_vis, y_vis, vis_pixmap)
+
+        if thr_pixmap is not None:
+            # Se c'è la visibile, allinea al suo centro e applica offset metadati
+            if vis_pixmap is not None:
+                base_vis_w = self.base_pixmap_visible.width()
+                base_vis_h = self.base_pixmap_visible.height()
+                scale_vx = vis_pixmap.width() / base_vis_w if base_vis_w else 1.0
+                scale_vy = vis_pixmap.height() / base_vis_h if base_vis_h else 1.0
+                ox = int(round(self.overlay_offset_x * scale_vx))
+                oy = int(round(self.overlay_offset_y * scale_vy))
+                x_thr = x_vis + (vis_pixmap.width() - thr_pixmap.width()) // 2 + ox
+                y_thr = y_vis + (vis_pixmap.height() - thr_pixmap.height()) // 2 + oy
+            else:
+                x_thr = (self.image_label.width() - thr_pixmap.width()) // 2 + int(self.pan_offset[0])
+                y_thr = (self.image_label.height() - thr_pixmap.height()) // 2 + int(self.pan_offset[1])
+            painter.setOpacity(self.overlay_alpha)
+            painter.drawPixmap(x_thr, y_thr, thr_pixmap)
+            painter.setOpacity(1.0)
+
         painter.end()
         self.image_label.setPixmap(canvas)
 
@@ -589,6 +767,51 @@ class ThermalAnalyzerNG(QMainWindow):
     def on_invert_palette(self):
         self.palette_inverted = not self.palette_inverted
         self.update_analysis()
+
+    # --- Overlay related helpers ---
+    def on_overlay_toggled(self, checked: bool):
+        self.overlay_mode = checked
+        self.display_images()
+
+    def on_overlay_alpha_changed(self, value: int):
+        self.overlay_alpha = max(0.0, min(1.0, value / 100.0))
+        if self.overlay_mode:
+            self.display_images()
+
+    def on_scale_spin_changed(self, value: float):
+        self.overlay_scale = float(value)
+        if self.overlay_mode:
+            self.display_images()
+
+    def on_offsetx_changed(self, value: int):
+        self.overlay_offset_x = float(value)
+        if self.overlay_mode:
+            self.display_images()
+
+    def on_offsety_changed(self, value: int):
+        self.overlay_offset_y = float(value)
+        if self.overlay_mode:
+            self.display_images()
+
+    def on_reset_alignment(self):
+        # Ripristina valori letti dai metadati (se presenti)
+        self.overlay_scale = float(self.meta_overlay_scale)
+        self.overlay_offset_x = float(self.meta_offset_x)
+        self.overlay_offset_y = float(self.meta_offset_y)
+        # Sincronizza controlli UI
+        try:
+            self.scale_spin.blockSignals(True)
+            self.offsetx_spin.blockSignals(True)
+            self.offsety_spin.blockSignals(True)
+            self.scale_spin.setValue(self.overlay_scale)
+            self.offsetx_spin.setValue(int(round(self.overlay_offset_x)))
+            self.offsety_spin.setValue(int(round(self.overlay_offset_y)))
+        finally:
+            self.scale_spin.blockSignals(False)
+            self.offsetx_spin.blockSignals(False)
+            self.offsety_spin.blockSignals(False)
+        # Aggiorna la vista
+        self.display_images()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
