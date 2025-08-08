@@ -1,61 +1,24 @@
 import sys
+import json
+import io
+import subprocess
 import exiftool
 import numpy as np
-import json
-import subprocess
+from PIL import Image
+import matplotlib.cm as cm
+
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QVBoxLayout, QHBoxLayout, QWidget,
+    QMainWindow, QLabel, QVBoxLayout, QHBoxLayout, QWidget,
     QFileDialog, QMessageBox, QTextEdit, QSizePolicy, QLineEdit, QFormLayout,
     QGroupBox, QTabWidget, QToolBar, QComboBox, QSizePolicy as QSP,
     QCheckBox, QPushButton, QSlider, QDoubleSpinBox, QSpinBox
 )
-from PySide6.QtGui import QAction
-from PySide6.QtGui import QPixmap, QImage, QIcon
-from PySide6.QtCore import Qt
-from PIL import Image
-import io
-import matplotlib.cm as cm
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QAction, QPixmap, QImage, QIcon, QColor, QPen, QFontMetrics, QPainter
+from PySide6.QtCore import Qt, QRect
 
-# Palette mapping
-PALETTE_MAP = {
-    "Iron": cm.inferno,
-    "Rainbow": cm.nipy_spectral,
-    "Grayscale": cm.gray,
-    "Lava": cm.hot,
-    "Arctic": cm.cool,
-    "Glowbow": cm.gist_rainbow,
-    "Amber": cm.YlOrBr,
-    "Sepia": cm.copper,
-    "Plasma": cm.plasma,
-    "Viridis": cm.viridis,
-    "Magma": cm.magma,
-    "Cividis": cm.cividis,
-    "Turbo": cm.turbo,
-    "Ocean": cm.ocean,
-    "Terrain": cm.terrain,
-    "Jet": cm.jet,
-    "Fire": cm.afmhot,
-    "Ice": cm.winter,
-    "Spring": cm.spring_r,
-    "Summer": cm.summer,
-    "Autumn": cm.autumn,
-    "Bone": cm.bone,
-    "Pink": cm.pink,
-    "Coolwarm": cm.coolwarm,
-    "RdYlBu": cm.RdYlBu_r,
-    "Spectral": cm.Spectral_r,
-    "BrBG": cm.BrBG_r,
-    "PiYG": cm.PiYG_r,
-    "PRGn": cm.PRGn_r,
-    "RdBu": cm.RdBu_r,
-    "RdGy": cm.RdGy_r,
-    "Purples": cm.Purples,
-    "Blues": cm.Blues,
-    "Greens": cm.Greens,
-    "Oranges": cm.Oranges,
-    "Reds": cm.Reds,
-}
+from constants import PALETTE_MAP
+from .widgets.color_bar_legend import ColorBarLegend
+
 
 class ThermalAnalyzerNG(QMainWindow):
     def __init__(self):
@@ -67,7 +30,7 @@ class ThermalAnalyzerNG(QMainWindow):
         self.toolbar = QToolBar("Main Toolbar")
         self.addToolBar(Qt.TopToolBarArea, self.toolbar)
         self.toolbar.setMovable(False)
-        # Pulsanti principali
+        # 1) File actions
         self.action_open = QAction(QIcon(), "Carica Immagine", self)
         self.action_open.triggered.connect(self.open_image)
         self.toolbar.addAction(self.action_open)
@@ -76,7 +39,7 @@ class ThermalAnalyzerNG(QMainWindow):
         self.action_export = QAction(QIcon(), "Esporta", self)
         self.toolbar.addAction(self.action_export)  # TODO: implementa esportazione
         self.toolbar.addSeparator()
-        # Selettore palette
+        # 2) Palette controls
         self.palette_combo = QComboBox()
         self.palette_combo.addItems([
             "Iron", "Rainbow", "Grayscale", "Lava", "Arctic", "Glowbow", "Amber", "Sepia", "Plasma", "Viridis", "Magma", "Cividis", "Turbo", "Ocean", "Terrain", "Jet", "Fire", "Ice", "Spring", "Summer", "Autumn", "Bone", "Pink", "Coolwarm", "RdYlBu", "Spectral", "BrBG", "PiYG", "PRGn", "RdBu", "RdGy", "Purples", "Blues", "Greens", "Oranges", "Reds"
@@ -89,17 +52,28 @@ class ThermalAnalyzerNG(QMainWindow):
         self.action_invert_palette.triggered.connect(self.on_invert_palette)
         self.toolbar.addAction(self.action_invert_palette)
         self.toolbar.addSeparator()
-        # --- Overlay Controls ---
+        # 3) Overlay toggle + grouped overlay controls
         self.action_overlay_view = QAction("Overlay", self)
         self.action_overlay_view.setCheckable(True)
         self.action_overlay_view.toggled.connect(self.on_overlay_toggled)
         self.toolbar.addAction(self.action_overlay_view)
+        # Crea un contenitore compatto per i controlli overlay, così lo slider non si comprime eccessivamente
+        self.overlay_controls_widget = QWidget()
+        _ovl = QHBoxLayout(self.overlay_controls_widget)
+        _ovl.setContentsMargins(0, 0, 0, 0)
+        _ovl.setSpacing(6)
+        # Slider opacità con etichetta e larghezza minima
+        from PySide6.QtWidgets import QLabel as _QLabel
+        _ovl.addWidget(_QLabel("Opacità"))
         self.overlay_alpha_slider = QSlider(Qt.Horizontal)
         self.overlay_alpha_slider.setRange(0, 100)
         self.overlay_alpha_slider.setValue(50)
         self.overlay_alpha_slider.setToolTip("Opacità termica in overlay")
+        self.overlay_alpha_slider.setMinimumWidth(160)
+        self.overlay_alpha_slider.setMaximumWidth(260)
+        self.overlay_alpha_slider.setSizePolicy(QSP.Preferred, QSP.Fixed)
         self.overlay_alpha_slider.valueChanged.connect(self.on_overlay_alpha_changed)
-        self.toolbar.addWidget(self.overlay_alpha_slider)
+        _ovl.addWidget(self.overlay_alpha_slider)
         # Spinbox scala manuale
         self.scale_spin = QDoubleSpinBox()
         self.scale_spin.setDecimals(3)
@@ -109,7 +83,7 @@ class ThermalAnalyzerNG(QMainWindow):
         self.scale_spin.setValue(1.0)
         self.scale_spin.setToolTip("Scala IR rispetto al visibile (Real2IR)")
         self.scale_spin.valueChanged.connect(self.on_scale_spin_changed)
-        self.toolbar.addWidget(self.scale_spin)
+        _ovl.addWidget(self.scale_spin)
         # Spinbox offset manuali (in pixel visibile)
         self.offsetx_spin = QSpinBox()
         self.offsetx_spin.setRange(-2000, 2000)
@@ -117,22 +91,35 @@ class ThermalAnalyzerNG(QMainWindow):
         self.offsetx_spin.setPrefix("OffX ")
         self.offsetx_spin.setToolTip("Offset X (pixel visibile)")
         self.offsetx_spin.valueChanged.connect(self.on_offsetx_changed)
-        self.toolbar.addWidget(self.offsetx_spin)
-
+        _ovl.addWidget(self.offsetx_spin)
         self.offsety_spin = QSpinBox()
         self.offsety_spin.setRange(-2000, 2000)
         self.offsety_spin.setSingleStep(1)
         self.offsety_spin.setPrefix("OffY ")
         self.offsety_spin.setToolTip("Offset Y (pixel visibile)")
         self.offsety_spin.valueChanged.connect(self.on_offsety_changed)
-        self.toolbar.addWidget(self.offsety_spin)
-        # Pulsante reset allineamento
+        _ovl.addWidget(self.offsety_spin)
+        # Combo box metodo di fusione (visibile solo in overlay)
+        self.blend_combo = QComboBox()
+        self.blend_combo.addItems([
+            "Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten",
+            "ColorDodge", "ColorBurn", "SoftLight", "HardLight", "Difference", "Exclusion", "Additive"
+        ])
+        self.blend_combo.setCurrentText("Normal")
+        self.blend_combo.setToolTip("Metodo di fusione per l'overlay termico")
+        self.blend_combo.currentTextChanged.connect(self.on_blend_mode_changed)
+        _ovl.addWidget(self.blend_combo)
+        # Inserisci il gruppo nella toolbar come singola azione
+        self.overlay_action = self.toolbar.addWidget(self.overlay_controls_widget)
+        # Pulsante reset allineamento (vicino ai controlli overlay)
         self.action_reset_align = QAction("Reset Allineamento", self)
         self.action_reset_align.setToolTip("Ripristina Scala e Offset da metadati")
         self.action_reset_align.triggered.connect(self.on_reset_alignment)
         self.toolbar.addAction(self.action_reset_align)
         self.toolbar.addSeparator()
-        # --- Zoom Controls ---
+        # Nascondi il gruppo overlay finché non è attivo
+        self.set_overlay_controls_visible(False)
+        # 4) Zoom controls
         self.zoom_factor = 1.0
         self.pan_offset = [0, 0]
         self._panning = False
@@ -147,15 +134,8 @@ class ThermalAnalyzerNG(QMainWindow):
         self.action_zoom_reset.triggered.connect(self.zoom_reset)
         self.toolbar.addAction(self.action_zoom_reset)
         self.toolbar.addSeparator()
-        # Strumenti di disegno (placeholder)
-        self.action_spot = QAction("Spot", self)
-        self.toolbar.addAction(self.action_spot)  # TODO: implementa aggiunta spot
-        self.action_rect = QAction("Rettangolo", self)
-        self.toolbar.addAction(self.action_rect)  # TODO: implementa aggiunta rettangolo
-        self.action_poly = QAction("Poligono", self)
-        self.toolbar.addAction(self.action_poly)  # TODO: implementa aggiunta poligono
-        self.toolbar.addSeparator()
-        # Spacer per allineare a sinistra
+        # 5) Strumenti di disegno spostati nel Tab "Aree & Analisi"
+        # Spacer per spingere gli elementi a sinistra
         self.toolbar.addWidget(QWidget())
         self.toolbar.widgetForAction(self.toolbar.actions()[-1]).setSizePolicy(QSP.Expanding, QSP.Preferred)
 
@@ -204,6 +184,18 @@ class ThermalAnalyzerNG(QMainWindow):
         self.temp_tooltip_label.setVisible(False)
         self.temp_tooltip_label.setParent(self.image_label)
 
+        # --- Legenda sempre visibile accanto alle immagini ---
+        self.legend_groupbox = QGroupBox("Legenda Temperatura (°C)")
+        self.legend_layout = QVBoxLayout(self.legend_groupbox)
+        self.legend_layout.setContentsMargins(8, 8, 8, 8)
+        self.legend_layout.setSpacing(6)
+        self.legend_layout.setAlignment(Qt.AlignCenter)
+        self.colorbar = ColorBarLegend()
+        self.legend_layout.addWidget(self.colorbar, alignment=Qt.AlignCenter)
+        self.legend_groupbox.setMaximumWidth(140)
+        # Inserisci la legenda tra l'area immagini e la sidebar a tab
+        self.main_layout.addWidget(self.legend_groupbox, stretch=0)
+
         # --- Sidebar a Tab ---
         self.sidebar_tabs = QTabWidget()
         self.sidebar_tabs.setTabPosition(QTabWidget.East)
@@ -226,20 +218,7 @@ class ThermalAnalyzerNG(QMainWindow):
             self.param_inputs[key] = line_edit
             self.params_layout.addRow(key, self.param_inputs[key])
         self.tab_params_layout.addWidget(self.params_groupbox)
-        # Legenda
-        self.legend_groupbox = QGroupBox("Legenda Temperatura (°C)")
-        self.legend_layout = QVBoxLayout(self.legend_groupbox)
-        self.legend_layout.setAlignment(Qt.AlignCenter)
-        self.legend_label_max = QLabel("Max")
-        self.legend_label_max.setAlignment(Qt.AlignCenter)
-        self.legend_gradient = QLabel()
-        self.legend_gradient.setMinimumHeight(200)
-        self.legend_label_min = QLabel("Min")
-        self.legend_label_min.setAlignment(Qt.AlignCenter)
-        self.legend_layout.addWidget(self.legend_label_max)
-        self.legend_layout.addWidget(self.legend_gradient, stretch=1)
-        self.legend_layout.addWidget(self.legend_label_min)
-        self.tab_params_layout.addWidget(self.legend_groupbox)
+        # (Legenda spostata accanto alle immagini; rimossa dal tab)
         # Metadati
         self.all_meta_display = QTextEdit("Tutti i metadati estratti appariranno qui.")
         self.all_meta_display.setReadOnly(True)
@@ -251,8 +230,22 @@ class ThermalAnalyzerNG(QMainWindow):
         self.tab_areas_layout = QVBoxLayout(self.tab_areas)
         self.tab_areas_layout.setContentsMargins(16, 16, 16, 16)
         self.tab_areas_layout.setSpacing(12)
-        # TODO: Lista aree/spot/poligoni con statistiche e parametri area
-        self.tab_areas_layout.addWidget(QLabel("[TODO] Qui verrà la lista delle aree, spot e poligoni con statistiche e parametri area."))
+
+        # Barra strumenti disegno (Spot, Rettangolo, Poligono) nella scheda Aree & Analisi
+        self.areas_tools_widget = QWidget()
+        _areas_tools = QHBoxLayout(self.areas_tools_widget)
+        _areas_tools.setContentsMargins(0, 0, 0, 0)
+        _areas_tools.setSpacing(12)
+
+        self.btn_spot = QPushButton("Spot")
+        self.btn_rect = QPushButton("Rettangolo")
+        self.btn_poly = QPushButton("Poligono")
+        _areas_tools.addWidget(self.btn_spot)
+        _areas_tools.addWidget(self.btn_rect)
+        _areas_tools.addWidget(self.btn_poly)
+        _areas_tools.addStretch(1)
+        self.tab_areas_layout.addWidget(self.areas_tools_widget)
+
         self.sidebar_tabs.addTab(self.tab_areas, "Aree & Analisi")
 
         # --- Tab 3: Batch/Export ---
@@ -332,6 +325,7 @@ class ThermalAnalyzerNG(QMainWindow):
         self.meta_overlay_scale = 1.0
         self.meta_offset_x = 0.0
         self.meta_offset_y = 0.0
+        self.overlay_blend_mode = "Normal"
 
     def open_image(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleziona Immagine FLIR", "", "Immagini JPEG (*.jpg *.jpeg)")
@@ -492,22 +486,11 @@ class ThermalAnalyzerNG(QMainWindow):
         self.base_pixmap = QPixmap.fromImage(q_image)
 
     def update_legend(self):
-        # Usa la colormap selezionata anche per la legenda
-        gradient_array = np.linspace(1, 0, 256).reshape(256, 1)
-        cmap = PALETTE_MAP.get(self.selected_palette, cm.inferno)
-        if self.palette_inverted:
-            gradient_array = 1.0 - gradient_array
-        gradient_colored = cmap(gradient_array)
-        gradient_8bit = (gradient_colored[:, :, :3] * 255).astype(np.uint8)
-        
-        h, w, _ = gradient_8bit.shape
-        q_image = QImage(gradient_8bit.data, w, h, w * 3, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(q_image)
-        
-        self.legend_gradient.setPixmap(pixmap.scaled(self.legend_gradient.width(), self.legend_gradient.height(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
-        self.legend_label_max.setText(f"{self.temp_max:.2f} °C")
-        self.legend_label_min.setText(f"{self.temp_min:.2f} °C")
-        
+        if self.temperature_data is None:
+            return
+        self.colorbar.set_palette(self.selected_palette, self.palette_inverted)
+        self.colorbar.set_range(self.temp_min, self.temp_max)
+
     def image_mouse_move(self, event):
         if self.temperature_data is None:
             return
@@ -723,9 +706,12 @@ class ThermalAnalyzerNG(QMainWindow):
             else:
                 x_thr = (self.image_label.width() - thr_pixmap.width()) // 2 + int(self.pan_offset[0])
                 y_thr = (self.image_label.height() - thr_pixmap.height()) // 2 + int(self.pan_offset[1])
+            # Blend mode
+            painter.setCompositionMode(self.get_qt_composition_mode())
             painter.setOpacity(self.overlay_alpha)
             painter.drawPixmap(x_thr, y_thr, thr_pixmap)
             painter.setOpacity(1.0)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
 
         painter.end()
         self.image_label.setPixmap(canvas)
@@ -771,6 +757,7 @@ class ThermalAnalyzerNG(QMainWindow):
     # --- Overlay related helpers ---
     def on_overlay_toggled(self, checked: bool):
         self.overlay_mode = checked
+        self.set_overlay_controls_visible(checked)
         self.display_images()
 
     def on_overlay_alpha_changed(self, value: int):
@@ -813,8 +800,32 @@ class ThermalAnalyzerNG(QMainWindow):
         # Aggiorna la vista
         self.display_images()
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = ThermalAnalyzerNG()
-    window.show()
-    sys.exit(app.exec())
+    def on_blend_mode_changed(self, mode: str):
+        self.overlay_blend_mode = mode
+        if self.overlay_mode:
+            self.display_images()
+
+    def get_qt_composition_mode(self):
+        mapping = {
+            "Normal": QPainter.CompositionMode_SourceOver,
+            "Multiply": QPainter.CompositionMode_Multiply,
+            "Screen": QPainter.CompositionMode_Screen,
+            "Overlay": QPainter.CompositionMode_Overlay,
+            "Darken": QPainter.CompositionMode_Darken,
+            "Lighten": QPainter.CompositionMode_Lighten,
+            "ColorDodge": QPainter.CompositionMode_ColorDodge,
+            "ColorBurn": QPainter.CompositionMode_ColorBurn,
+            "HardLight": QPainter.CompositionMode_HardLight,
+            "SoftLight": QPainter.CompositionMode_SoftLight,
+            "Difference": QPainter.CompositionMode_Difference,
+            "Exclusion": QPainter.CompositionMode_Exclusion,
+            "Additive": QPainter.CompositionMode_Plus,
+        }
+        return mapping.get(self.overlay_blend_mode, QPainter.CompositionMode_SourceOver)
+
+    def set_overlay_controls_visible(self, visible: bool):
+        # Mostra/Nasconde i controlli specifici dell'overlay
+        # Nascondi/mostra l'intero gruppo dei controlli overlay come singola azione
+        if hasattr(self, 'overlay_action') and self.overlay_action is not None:
+            self.overlay_action.setVisible(visible)
+        self.action_reset_align.setVisible(visible)
