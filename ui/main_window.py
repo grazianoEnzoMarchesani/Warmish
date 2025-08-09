@@ -14,10 +14,11 @@ from PySide6.QtWidgets import (
     QCheckBox, QPushButton, QSlider, QDoubleSpinBox, QSpinBox
 )
 from PySide6.QtGui import QAction, QPixmap, QImage, QIcon, QColor, QPen, QFontMetrics, QPainter
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtCore import Qt, QRect, QPointF
 
 from constants import PALETTE_MAP
 from .widgets.color_bar_legend import ColorBarLegend
+from .widgets.image_graphics_view import ImageGraphicsView
 
 
 class ThermalAnalyzerNG(QMainWindow):
@@ -153,36 +154,25 @@ class ThermalAnalyzerNG(QMainWindow):
         self.image_area_layout.setSpacing(8)
         self.main_layout.addWidget(self.image_area_widget, stretch=4)
 
-        # Immagine termica
-        self.image_label = QLabel("Nessuna immagine caricata.")
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setStyleSheet("border: 1px solid gray; background-color: #333;")
-        self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        self.image_label.setMouseTracking(True)
-        self.image_label.mouseMoveEvent = self.image_mouse_move_event
-        self.image_label.mousePressEvent = self.image_mouse_press
-        self.image_label.mouseReleaseEvent = self.image_mouse_release
-        self.image_area_layout.addWidget(self.image_label, stretch=1)
+        # Prima immagine: ImageGraphicsView per la termica (principale)
+        self.image_view = ImageGraphicsView()
+        self.image_view.setStyleSheet("border: 1px solid gray; background-color: #333;")
+        self.image_view.mouse_moved_on_thermal.connect(self.on_thermal_mouse_move)
+        self.image_area_layout.addWidget(self.image_view, stretch=1)
         
-        # Seconda immagine (sotto l'immagine termica)
-        self.secondary_image_label = QLabel("Seconda immagine (opzionale).")
-        self.secondary_image_label.setAlignment(Qt.AlignCenter)
-        self.secondary_image_label.setStyleSheet("border: 1px solid gray; background-color: #222;")
-        self.secondary_image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        self.secondary_image_label.setMouseTracking(True)
-        self.secondary_image_label.mousePressEvent = self.image_mouse_press
-        self.secondary_image_label.mouseReleaseEvent = self.image_mouse_release
-        self.secondary_image_label.mouseMoveEvent = self.secondary_image_mouse_move_event  # <--- CAMBIA QUI
-        self.image_area_layout.addWidget(self.secondary_image_label, stretch=1)
+        # Seconda immagine: ANCHE ImageGraphicsView per l'immagine visibile
+        self.secondary_image_view = ImageGraphicsView()
+        self.secondary_image_view.setStyleSheet("border: 1px solid gray; background-color: #222;")
+        self.image_area_layout.addWidget(self.secondary_image_view, stretch=1)
         
-        # TODO: Visualizzazione immagine visibile (se presente)
-        # TODO: Overlay aree/spot/poligoni (placeholder)
-
+        # Connetti i segnali di zoom/pan tra le due viste
+        self.sync_views()
+        
         # Tooltip per la temperatura
         self.temp_tooltip_label = QLabel("Temp: --.-- °C")
         self.temp_tooltip_label.setStyleSheet("background-color: black; color: white; padding: 4px; border-radius: 3px;")
         self.temp_tooltip_label.setVisible(False)
-        self.temp_tooltip_label.setParent(self.image_label)
+        self.temp_tooltip_label.setParent(self.image_view)
 
         # --- Legenda sempre visibile accanto alle immagini ---
         self.legend_groupbox = QGroupBox("Legenda Temperatura (°C)")
@@ -214,7 +204,7 @@ class ThermalAnalyzerNG(QMainWindow):
         param_keys = ["Emissivity", "ObjectDistance", "ReflectedApparentTemperature", "PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO"]
         for key in param_keys:
             line_edit = QLineEdit()
-            line_edit.editingFinished.connect(self.update_analysis)
+            line_edit.editingFinished.connect(self.recalculate_and_update_view)  # <--- CAMBIATO
             self.param_inputs[key] = line_edit
             self.params_layout.addRow(key, self.param_inputs[key])
         self.tab_params_layout.addWidget(self.params_groupbox)
@@ -315,17 +305,19 @@ class ThermalAnalyzerNG(QMainWindow):
         self.selected_palette = "Iron"
         self.palette_inverted = False  # Stato inversione palette
         self.palette_combo.currentIndexChanged.connect(self.on_palette_changed)
-        # Overlay state
-        self.overlay_mode = False
+        # Overlay state (ora gestito da ImageGraphicsView)
+        self.overlay_mode = False  # Inizia sempre in modalità normale
         self.overlay_alpha = 0.5
         self.overlay_scale = 1.0
-        self.visible_gray_full = None
         self.overlay_offset_x = 0.0
         self.overlay_offset_y = 0.0
         self.meta_overlay_scale = 1.0
         self.meta_offset_x = 0.0
         self.meta_offset_y = 0.0
         self.overlay_blend_mode = "Normal"
+        
+        # Assicurati che la seconda vista sia visibile all'inizio
+        self.secondary_image_view.setVisible(True)
 
     def open_image(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleziona Immagine FLIR", "", "Immagini JPEG (*.jpg *.jpeg)")
@@ -409,26 +401,49 @@ class ThermalAnalyzerNG(QMainWindow):
             if rgb_bytes:
                 image_rgb = Image.open(io.BytesIO(rgb_bytes))
                 image_rgb = image_rgb.convert("RGB")
-                # Salva anche versione grayscale per auto-allineamento
                 self.visible_gray_full = np.array(image_rgb.convert("L"), dtype=np.float32) / 255.0
                 data = image_rgb.tobytes("raw", "RGB")
                 qimage = QImage(data, image_rgb.width, image_rgb.height, QImage.Format_RGB888)
                 pixmap = QPixmap.fromImage(qimage)
-                self.base_pixmap_visible = pixmap  # <--- SALVA LA PIXMAP ORIGINALE
-                # Scala overlay già impostata da metadati; aggiorna la vista
-                self.display_images()
+                self.base_pixmap_visible = pixmap
+                
+                # Aggiorna le viste - assicurati che non siamo in overlay mode all'inizio
+                self.overlay_mode = False  # Forza modalità normale
+                self.display_images()  # Questo dovrebbe mostrare entrambe le immagini
             else:
-                self.secondary_image_label.setText("Nessuna immagine visibile trovata.")
+                self.base_pixmap_visible = None
+                self.display_images()
+                
         except Exception as e:
-            self.secondary_image_label.setText("Errore caricamento immagine visibile.")
+            print(f"Errore caricamento immagine visibile: {e}")
+            self.base_pixmap_visible = None
+            self.display_images()
 
-    def update_analysis(self):
-        if self.thermal_data is None: return
+    def recalculate_and_update_view(self):
+        """Ricalcola la matrice delle temperature e aggiorna completamente la vista.
+        Da usare quando cambiano i parametri termici."""
+        if self.thermal_data is None: 
+            return
         print(">>> Ricalcolo temperature e visualizzazione...")
         self.calculate_temperature_matrix()
         self.create_colored_pixmap()
         self.update_legend()
         self.display_images()
+
+    def update_view_only(self):
+        """Aggiorna solo la visualizzazione usando i dati di temperatura già calcolati.
+        Da usare quando cambia solo la palette o l'inversione colori."""
+        if self.temperature_data is None:
+            return
+        print(">>> Aggiornamento solo visualizzazione...")
+        self.create_colored_pixmap()
+        self.update_legend()
+        self.display_images()
+
+    # Mantieni update_analysis per compatibilità con altre parti del codice
+    def update_analysis(self):
+        """Metodo legacy - preferire recalculate_and_update_view()"""
+        self.recalculate_and_update_view()
 
     def populate_params(self):
         if not self.metadata: return
@@ -484,6 +499,9 @@ class ThermalAnalyzerNG(QMainWindow):
         height, width, _ = image_8bit.shape
         q_image = QImage(image_8bit.data, width, height, width * 3, QImage.Format_RGB888)
         self.base_pixmap = QPixmap.fromImage(q_image)
+        
+        # Aggiorna la vista termica SEMPRE quando si crea una nuova pixmap
+        self.display_thermal_image()
 
     def update_legend(self):
         if self.temperature_data is None:
@@ -491,273 +509,140 @@ class ThermalAnalyzerNG(QMainWindow):
         self.colorbar.set_palette(self.selected_palette, self.palette_inverted)
         self.colorbar.set_range(self.temp_min, self.temp_max)
 
-    def image_mouse_move(self, event):
-        if self.temperature_data is None:
-            return
-
-        pos = event.position()
-        label_size = self.image_label.size()
-        # Calcola la dimensione dell'immagine visualizzata (dopo zoom)
-        target_size = label_size * self.zoom_factor
-        pixmap_width = int(target_size.width())
-        pixmap_height = int(target_size.height())
-
-        # Calcola l'offset per centrare l'immagine e aggiungi il pan
-        offset_x = (label_size.width() - pixmap_width) // 2 + int(self.pan_offset[0])
-        offset_y = (label_size.height() - pixmap_height) // 2 + int(self.pan_offset[1])
-
-        # Posizione del mouse relativa all'immagine visualizzata
-        pix_x = pos.x() - offset_x
-        pix_y = pos.y() - offset_y
-
-        img_h, img_w = self.temperature_data.shape
-        # Mappa la posizione del mouse sulla matrice dati
-        if 0 <= pix_x < pixmap_width and 0 <= pix_y < pixmap_height:
-            matrix_x = int(pix_x * img_w / pixmap_width)
-            matrix_y = int(pix_y * img_h / pixmap_height)
-            if 0 <= matrix_x < img_w and 0 <= matrix_y < img_h:
-                temperature = self.temperature_data[matrix_y, matrix_x]
-                if not np.isnan(temperature):
-                    self.temp_tooltip_label.setText(f"{temperature:.2f} °C")
-                    self.temp_tooltip_label.move(int(pos.x()) + 10, int(pos.y()) + 10)
-                    self.temp_tooltip_label.setVisible(True)
-                    self.temp_tooltip_label.adjustSize()
-                else:
-                    self.temp_tooltip_label.setVisible(False)
-            else:
-                self.temp_tooltip_label.setVisible(False)
-        else:
-            self.temp_tooltip_label.setVisible(False)
-        
-    # --- Panning Methods ---
-    def image_mouse_press(self, event):
-        if event.button() == Qt.LeftButton:
-            self._panning = True
-            self._pan_start = (event.position().x(), event.position().y())
-
-    def image_mouse_release(self, event):
-        if event.button() == Qt.LeftButton:
-            self._panning = False
-            self._pan_start = None
-
-    def image_mouse_move_event(self, event):
-        # Gestione panning
-        if self._panning and self._pan_start:
-            dx = event.position().x() - self._pan_start[0]
-            dy = event.position().y() - self._pan_start[1]
-            self._pan_start = (event.position().x(), event.position().y())
-            self.pan_offset[0] += dx
-            self.pan_offset[1] += dy
-            self.display_images()
-            # Nascondi il tooltip durante il pan
-            self.temp_tooltip_label.setVisible(False)
-        else:
-            # Gestione tooltip temperatura
-            if self.temperature_data is None:
-                self.temp_tooltip_label.setVisible(False)
-                return
-
-            pos = event.position()
-            label_size = self.image_label.size()
-            target_size = label_size * self.zoom_factor
-
-            # Se overlay attivo, usa le dimensioni della termica in overlay e includi offset
-            if self.overlay_mode:
-                thr_pixmap = self.base_pixmap.scaled(
-                    int(target_size.width() * self.overlay_scale),
-                    int(target_size.height() * self.overlay_scale),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation
-                ) if self.base_pixmap is not None else None
-                if thr_pixmap is None:
-                    self.temp_tooltip_label.setVisible(False)
-                    return
-                if self.base_pixmap_visible is not None:
-                    vis_pixmap = self.base_pixmap_visible.scaled(
-                        int(target_size.width()), int(target_size.height()),
-                        Qt.KeepAspectRatio, Qt.SmoothTransformation
-                    )
-                    x_vis = (label_size.width() - vis_pixmap.width()) // 2 + int(self.pan_offset[0])
-                    y_vis = (label_size.height() - vis_pixmap.height()) // 2 + int(self.pan_offset[1])
-                    base_vis_w = self.base_pixmap_visible.width()
-                    base_vis_h = self.base_pixmap_visible.height()
-                    scale_vx = vis_pixmap.width() / base_vis_w if base_vis_w else 1.0
-                    scale_vy = vis_pixmap.height() / base_vis_h if base_vis_h else 1.0
-                    ox = int(round(self.overlay_offset_x * scale_vx))
-                    oy = int(round(self.overlay_offset_y * scale_vy))
-                    pixmap_width = thr_pixmap.width()
-                    pixmap_height = thr_pixmap.height()
-                    offset_x = x_vis + (vis_pixmap.width() - pixmap_width) // 2 + ox
-                    offset_y = y_vis + (vis_pixmap.height() - pixmap_height) // 2 + oy
-                else:
-                    pixmap_width = thr_pixmap.width()
-                    pixmap_height = thr_pixmap.height()
-                    offset_x = (label_size.width() - pixmap_width) // 2 + int(self.pan_offset[0])
-                    offset_y = (label_size.height() - pixmap_height) // 2 + int(self.pan_offset[1])
-            else:
-                pixmap_width = int(target_size.width())
-                pixmap_height = int(target_size.height())
-                offset_x = (label_size.width() - pixmap_width) // 2 + int(self.pan_offset[0])
-                offset_y = (label_size.height() - pixmap_height) // 2 + int(self.pan_offset[1])
-
-            pix_x = pos.x() - offset_x
-            pix_y = pos.y() - offset_y
-
-            img_h, img_w = self.temperature_data.shape
-            if 0 <= pix_x < pixmap_width and 0 <= pix_y < pixmap_height:
-                matrix_x = int(pix_x * img_w / pixmap_width)
-                matrix_y = int(pix_y * img_h / pixmap_height)
-                if 0 <= matrix_x < img_w and 0 <= matrix_y < img_h:
-                    temperature = self.temperature_data[matrix_y, matrix_x]
-                    if not np.isnan(temperature):
-                        self.temp_tooltip_label.setText(f"{temperature:.2f} °C")
-                        self.temp_tooltip_label.move(int(pos.x()) + 10, int(pos.y()) + 10)
-                        self.temp_tooltip_label.setVisible(True)
-                        self.temp_tooltip_label.adjustSize()
-                        return
-            self.temp_tooltip_label.setVisible(False)
-
-    def secondary_image_mouse_move_event(self, event):
-        self.temp_tooltip_label.setVisible(False)  # <--- NASCONDI SEMPRE IL TOOLTIP
-
-    # --- Zoom Methods ---
-    def zoom_in(self):
-        self.zoom_factor *= 1.2
-        self.display_images()
-
-    def zoom_out(self):
-        self.zoom_factor /= 1.2
-        self.display_images()
-
-    def zoom_reset(self):
-        self.zoom_factor = 1.0
-        self.pan_offset = [0, 0]
-        self.display_images()
-
-    def display_images(self):
-        if self.overlay_mode and self.base_pixmap_visible is not None:
-            self.display_overlay_image()
-            self.secondary_image_label.setVisible(False)
-        else:
-            self.display_thermal_image()
-            self.display_secondary_image()
-            self.secondary_image_label.setVisible(True)
-
-    def display_thermal_image(self):
-        if self.base_pixmap is None:
-            return
-        target_size = self.image_label.size() * self.zoom_factor
-        pixmap = self.base_pixmap.scaled(
-            int(target_size.width()), int(target_size.height()),
-            Qt.KeepAspectRatio, Qt.SmoothTransformation
-        )
-        # Crea una QPixmap vuota della dimensione del widget
-        canvas = QPixmap(self.image_label.size())
-        canvas.fill(Qt.transparent)
-        painter = QPainter(canvas)
-        # Calcola il centro e applica il pan
-        x = (self.image_label.width() - pixmap.width()) // 2 + int(self.pan_offset[0])
-        y = (self.image_label.height() - pixmap.height()) // 2 + int(self.pan_offset[1])
-        painter.drawPixmap(x, y, pixmap)
-        painter.end()
-        self.image_label.setPixmap(canvas)
-
-    def display_overlay_image(self):
-        if self.base_pixmap is None and self.base_pixmap_visible is None:
-            return
-        target_size = self.image_label.size() * self.zoom_factor
-        # Visibile come base
-        if self.base_pixmap_visible is not None:
-            vis_pixmap = self.base_pixmap_visible.scaled(
-                int(target_size.width()), int(target_size.height()),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-        else:
-            vis_pixmap = None
-        # Termica come overlay con scala relativa
-        if self.base_pixmap is not None:
-            thr_pixmap = self.base_pixmap.scaled(
-                int(target_size.width() * self.overlay_scale),
-                int(target_size.height() * self.overlay_scale),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-        else:
-            thr_pixmap = None
-
-        canvas = QPixmap(self.image_label.size())
-        canvas.fill(Qt.transparent)
-        painter = QPainter(canvas)
-
-        if vis_pixmap is not None:
-            x_vis = (self.image_label.width() - vis_pixmap.width()) // 2 + int(self.pan_offset[0])
-            y_vis = (self.image_label.height() - vis_pixmap.height()) // 2 + int(self.pan_offset[1])
-            painter.drawPixmap(x_vis, y_vis, vis_pixmap)
-
-        if thr_pixmap is not None:
-            # Se c'è la visibile, allinea al suo centro e applica offset metadati
-            if vis_pixmap is not None:
-                base_vis_w = self.base_pixmap_visible.width()
-                base_vis_h = self.base_pixmap_visible.height()
-                scale_vx = vis_pixmap.width() / base_vis_w if base_vis_w else 1.0
-                scale_vy = vis_pixmap.height() / base_vis_h if base_vis_h else 1.0
-                ox = int(round(self.overlay_offset_x * scale_vx))
-                oy = int(round(self.overlay_offset_y * scale_vy))
-                x_thr = x_vis + (vis_pixmap.width() - thr_pixmap.width()) // 2 + ox
-                y_thr = y_vis + (vis_pixmap.height() - thr_pixmap.height()) // 2 + oy
-            else:
-                x_thr = (self.image_label.width() - thr_pixmap.width()) // 2 + int(self.pan_offset[0])
-                y_thr = (self.image_label.height() - thr_pixmap.height()) // 2 + int(self.pan_offset[1])
-            # Blend mode
-            painter.setCompositionMode(self.get_qt_composition_mode())
-            painter.setOpacity(self.overlay_alpha)
-            painter.drawPixmap(x_thr, y_thr, thr_pixmap)
-            painter.setOpacity(1.0)
-            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-
-        painter.end()
-        self.image_label.setPixmap(canvas)
-
-    def display_secondary_image(self):
-        if self.base_pixmap_visible is not None:
-            target_size = self.secondary_image_label.size() * self.zoom_factor
-            pixmap = self.base_pixmap_visible.scaled(
-                int(target_size.width()), int(target_size.height()),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            canvas = QPixmap(self.secondary_image_label.size())
-            canvas.fill(Qt.transparent)
-            painter = QPainter(canvas)
-            x = (self.secondary_image_label.width() - pixmap.width()) // 2 + int(self.pan_offset[0])
-            y = (self.secondary_image_label.height() - pixmap.height()) // 2 + int(self.pan_offset[1])
-            painter.drawPixmap(x, y, pixmap)
-            painter.end()
-            self.secondary_image_label.setPixmap(canvas)
-        else:
-            self.secondary_image_label.clear()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.display_images()
-        self.update_legend()
-        # Aggiorna anche la seconda immagine
-        if self.secondary_image_label.pixmap():
-            self.secondary_image_label.setPixmap(
-                self.secondary_image_label.pixmap().scaled(
-                    self.secondary_image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-            )
-
     def on_palette_changed(self, idx):
         self.selected_palette = self.palette_combo.currentText()
-        self.update_analysis()
+        self.update_view_only()  # Solo ricolorazione
 
     def on_invert_palette(self):
         self.palette_inverted = not self.palette_inverted
-        self.update_analysis()
+        self.update_view_only()  # Solo ricolorazione
 
-    # --- Overlay related helpers ---
+    # NUOVO METODO: Gestione mouse move sulla mappa termica
+    def on_thermal_mouse_move(self, point: QPointF):
+        """Slot per gestire il movimento del mouse sulla mappa termica."""
+        if self.temperature_data is None:
+            self.temp_tooltip_label.setVisible(False)
+            return
+        
+        # Converti le coordinate in indici della matrice
+        img_h, img_w = self.temperature_data.shape
+        matrix_x = int(point.x())
+        matrix_y = int(point.y())
+        
+        if 0 <= matrix_x < img_w and 0 <= matrix_y < img_h:
+            temperature = self.temperature_data[matrix_y, matrix_x]
+            if not np.isnan(temperature):
+                self.temp_tooltip_label.setText(f"{temperature:.2f} °C")
+                
+                # Posiziona il tooltip vicino al cursore
+                cursor_pos = self.image_view.mapFromGlobal(self.cursor().pos())
+                self.temp_tooltip_label.move(cursor_pos.x() + 10, cursor_pos.y() + 10)
+                self.temp_tooltip_label.setVisible(True)
+                self.temp_tooltip_label.adjustSize()
+                return
+        
+        self.temp_tooltip_label.setVisible(False)
+
+    # METODI MODIFICATI: Gestione immagini
+    def display_images(self):
+        """Aggiorna la visualizzazione delle immagini nella vista."""
+        if self.overlay_mode:
+            # Assicurati che l'immagine visibile sia impostata nell'ImageGraphicsView
+            if self.base_pixmap_visible is not None:
+                self.image_view.set_visible_pixmap(self.base_pixmap_visible)
+            
+            # Attiva la modalità overlay
+            offset = QPointF(self.overlay_offset_x, self.overlay_offset_y)
+            blend_mode = self.get_qt_composition_mode()
+            
+            self.image_view.update_overlay(
+                visible=True,
+                alpha=self.overlay_alpha,
+                scale=self.overlay_scale,
+                offset=offset,
+                blend_mode=blend_mode
+            )
+            # Nascondi la seconda vista quando in overlay
+            self.secondary_image_view.setVisible(False)
+        else:
+            # In modalità normale, mostra le immagini separate
+            self.image_view.update_overlay(visible=False)
+            self.display_secondary_image()  # Assicurati che questo venga chiamato
+            self.secondary_image_view.setVisible(True)  # Assicurati che sia visibile
+    
+    def display_thermal_image(self):
+        """Imposta l'immagine termica nella vista."""
+        if self.base_pixmap is not None:
+            self.image_view.set_thermal_pixmap(self.base_pixmap)
+    
+    def display_secondary_image(self):
+        """Imposta l'immagine visibile nella seconda vista."""
+        print(f"display_secondary_image called, pixmap available: {self.base_pixmap_visible is not None}")
+        if self.base_pixmap_visible is not None:
+            self.secondary_image_view.set_thermal_pixmap(self.base_pixmap_visible)
+            print(f"Secondary view pixmap set, size: {self.base_pixmap_visible.size()}")
+        else:
+            self.secondary_image_view.set_thermal_pixmap(QPixmap())
+            print("Secondary view cleared")
+
+    def create_colored_pixmap(self):
+        if self.temperature_data is None: return
+        
+        # Normalizza i dati di temperatura da min/max a 0-1
+        # Aggiungiamo un piccolo epsilon per evitare divisioni per zero se min=max
+        temp_range = self.temp_max - self.temp_min
+        if temp_range == 0: temp_range = 1 
+        
+        norm_data = (self.temperature_data - self.temp_min) / temp_range
+        norm_data = np.nan_to_num(norm_data)
+
+        # Usa la colormap selezionata
+        cmap = PALETTE_MAP.get(self.selected_palette, cm.inferno)
+        if self.palette_inverted:
+            norm_data = 1.0 - norm_data
+        colored_data = cmap(norm_data)
+        image_8bit = (colored_data[:, :, :3] * 255).astype(np.uint8)
+        
+        height, width, _ = image_8bit.shape
+        q_image = QImage(image_8bit.data, width, height, width * 3, QImage.Format_RGB888)
+        self.base_pixmap = QPixmap.fromImage(q_image)
+        
+        # Aggiorna la vista termica SEMPRE quando si crea una nuova pixmap
+        self.display_thermal_image()
+
+    # METODI SEMPLIFICATI: Zoom e Pan
+    def zoom_in(self):
+        self.image_view.zoom_in()
+        if hasattr(self, 'secondary_image_view'):
+            self.secondary_image_view.zoom_in()
+
+    def zoom_out(self):
+        self.image_view.zoom_out()
+        if hasattr(self, 'secondary_image_view'):
+            self.secondary_image_view.zoom_out()
+
+    def zoom_reset(self):
+        self.image_view.reset_zoom()
+        if hasattr(self, 'secondary_image_view'):
+            self.secondary_image_view.reset_zoom()
+
+    # METODI DA RIMUOVERE O SEMPLIFICARE:
+    # - image_mouse_move_event
+    # - image_mouse_press
+    # - image_mouse_release  
+    # - secondary_image_mouse_move_event
+    # - display_overlay_image (logica ora in ImageGraphicsView)
+    # - Tutta la logica manuale di calcolo coordinate e canvas
+
+    # METODI MODIFICATI: Overlay controls
     def on_overlay_toggled(self, checked: bool):
         self.overlay_mode = checked
         self.set_overlay_controls_visible(checked)
+        
+        # Se stiamo attivando l'overlay e c'è un'immagine visibile, impostala
+        if checked and self.base_pixmap_visible is not None:
+            self.image_view.set_visible_pixmap(self.base_pixmap_visible)
+        
         self.display_images()
 
     def on_overlay_alpha_changed(self, value: int):
@@ -769,6 +654,10 @@ class ThermalAnalyzerNG(QMainWindow):
         self.overlay_scale = float(value)
         if self.overlay_mode:
             self.display_images()
+            # Debug: stampa informazioni sulla scala
+            if hasattr(self.image_view, 'get_scale_info'):
+                scale_info = self.image_view.get_scale_info()
+                print(f"Scale info: {scale_info}")
 
     def on_offsetx_changed(self, value: int):
         self.overlay_offset_x = float(value)
@@ -803,7 +692,17 @@ class ThermalAnalyzerNG(QMainWindow):
     def on_blend_mode_changed(self, mode: str):
         self.overlay_blend_mode = mode
         if self.overlay_mode:
-            self.display_images()
+            # Aggiorna solo il blend mode senza cambiare altro
+            blend_mode = self.get_qt_composition_mode()
+            offset = QPointF(self.overlay_offset_x, self.overlay_offset_y)
+            
+            self.image_view.update_overlay(
+                visible=True,
+                alpha=self.overlay_alpha,
+                scale=self.overlay_scale,
+                offset=offset,
+                blend_mode=blend_mode
+            )
 
     def get_qt_composition_mode(self):
         mapping = {
@@ -829,3 +728,24 @@ class ThermalAnalyzerNG(QMainWindow):
         if hasattr(self, 'overlay_action') and self.overlay_action is not None:
             self.overlay_action.setVisible(visible)
         self.action_reset_align.setVisible(visible)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Ridimensiona l'immagine visibile quando la finestra viene ridimensionata
+        if hasattr(self, 'secondary_image_view') and self.base_pixmap_visible is not None:
+            self.display_secondary_image()
+
+    def sync_views(self):
+        """Sincronizza zoom e pan tra le due ImageGraphicsView."""
+        self.image_view.view_transformed.connect(self.on_primary_view_transformed)
+        self.secondary_image_view.view_transformed.connect(self.on_secondary_view_transformed)
+        
+    def on_primary_view_transformed(self, zoom_factor: float, pan_offset: QPointF, pixmap_size: tuple):
+        """Sincronizza la vista secondaria quando cambia quella primaria."""
+        if hasattr(self, 'secondary_image_view') and self.secondary_image_view.isVisible():
+            self.secondary_image_view.sync_transform(zoom_factor, pan_offset, pixmap_size)
+            
+    def on_secondary_view_transformed(self, zoom_factor: float, pan_offset: QPointF, pixmap_size: tuple):
+        """Sincronizza la vista primaria quando cambia quella secondaria."""
+        if self.image_view.isVisible():
+            self.image_view.sync_transform(zoom_factor, pan_offset, pixmap_size)
