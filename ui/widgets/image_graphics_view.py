@@ -1,7 +1,7 @@
 from typing import Optional
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QStyleOptionGraphicsItem
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QStyleOptionGraphicsItem, QGraphicsRectItem
 from PySide6.QtCore import Qt, QPointF, Signal, QRectF
-from PySide6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QTransform
+from PySide6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QTransform, QPen, QBrush, QColor
 
 
 class BlendablePixmapItem(QGraphicsPixmapItem):
@@ -46,6 +46,9 @@ class ImageGraphicsView(QGraphicsView):
     # Segnale aggiornato per includere dimensioni pixmap
     view_transformed = Signal(float, QPointF, tuple)  # zoom_factor, pan_offset, pixmap_size
     
+    # Nuovo segnale per ROI creati
+    roi_created = Signal(QRectF)  # Emesso quando un ROI viene completato
+    
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         
@@ -87,6 +90,12 @@ class ImageGraphicsView(QGraphicsView):
         
         # Configurazione mouse tracking
         self.setMouseTracking(True)
+        
+        # ROI drawing state
+        self._main_window = None  # Reference to main window
+        self._roi_drawing = False
+        self._roi_start_pos = None
+        self._temp_roi_item = None
         
     def set_thermal_pixmap(self, pixmap: QPixmap):
         """Imposta l'immagine termica."""
@@ -349,25 +358,37 @@ class ImageGraphicsView(QGraphicsView):
                 pixmap_size = self.get_current_pixmap_size()
                 self.view_transformed.emit(self._zoom_factor, self.get_pan_offset(), pixmap_size)
 
+    def set_main_window(self, main_window):
+        """Imposta il riferimento alla finestra principale."""
+        self._main_window = main_window
+
     def mousePressEvent(self, event: QMouseEvent):
         """Gestione click del mouse."""
+        # Check if we're in ROI drawing mode
+        if (self._main_window and 
+            hasattr(self._main_window, 'current_drawing_tool') and 
+            self._main_window.current_drawing_tool == "rect" and 
+            event.button() == Qt.LeftButton):
+            
+            # Start ROI drawing
+            self._start_roi_drawing(event)
+            return  # Don't call super() to prevent other mouse handling
+        
+        # Handle middle button for panning
         if event.button() == Qt.MiddleButton:
-            # Pan con tasto centrale
             self.setDragMode(QGraphicsView.ScrollHandDrag)
             self._pan_active = True
         
         super().mousePressEvent(event)
     
-    def mouseReleaseEvent(self, event: QMouseEvent):
-        """Gestione rilascio del mouse."""
-        if event.button() == Qt.MiddleButton:
-            self.setDragMode(QGraphicsView.RubberBandDrag)
-            self._pan_active = False
-        
-        super().mouseReleaseEvent(event)
-    
     def mouseMoveEvent(self, event: QMouseEvent):
-        """Gestione movimento del mouse per tooltip temperatura e sincronizzazione pan."""
+        """Gestione movimento del mouse per tooltip temperatura, sincronizzazione pan e ROI drawing."""
+        
+        # Handle ROI drawing
+        if self._roi_drawing:
+            self._update_roi_drawing(event)
+        
+        # Continue with existing functionality
         super().mouseMoveEvent(event)
         
         # Emetti segnale se è cambiato il pan
@@ -383,18 +404,128 @@ class ImageGraphicsView(QGraphicsView):
             # Converti in coordinate dell'immagine originale
             thermal_rect = self._thermal_item.boundingRect()
             if thermal_rect.contains(thermal_pos):
-                # Normalizza le coordinate (0-1)
-                norm_x = thermal_pos.x() / thermal_rect.width()
-                norm_y = thermal_pos.y() / thermal_rect.height()
-                
-                # Converti in pixel dell'immagine originale
-                original_pixmap = self._thermal_item.pixmap()
-                pixel_x = norm_x * original_pixmap.width()
-                pixel_y = norm_y * original_pixmap.height()
-                
-                # Emetti il segnale con le coordinate
-                self.mouse_moved_on_thermal.emit(QPointF(pixel_x, pixel_y))
-    
+                # Emetti il segnale con le coordinate relative all'immagine
+                self.mouse_moved_on_thermal.emit(thermal_pos)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        """Gestione rilascio del mouse."""
+        
+        # Handle ROI drawing completion
+        if (self._roi_drawing and event.button() == Qt.LeftButton):
+            self._finish_roi_drawing(event)
+            return  # Don't call super() to prevent other mouse handling
+            
+        # Handle middle button for panning
+        if event.button() == Qt.MiddleButton:
+            self.setDragMode(QGraphicsView.RubberBandDrag)
+            self._pan_active = False
+        
+        super().mouseReleaseEvent(event)
+
+    def _start_roi_drawing(self, event: QMouseEvent):
+        """Inizia il disegno di un ROI."""
+        scene_pos = self.mapToScene(event.pos())
+        self._roi_start_pos = scene_pos
+        self._roi_drawing = True
+        
+        # Create temporary ROI item for visual feedback
+        temp_rect = QRectF(scene_pos.x(), scene_pos.y(), 1, 1)
+        self._temp_roi_item = self._scene.addRect(
+            temp_rect,
+            QPen(QColor(255, 165, 0), 2),  # Orange pen
+            QBrush(QColor(255, 165, 0, 40))  # Semi-transparent orange
+        )
+        print(f"Started ROI drawing at: {scene_pos}")
+
+    def _update_roi_drawing(self, event: QMouseEvent):
+        """Aggiorna il disegno del ROI durante il movimento del mouse."""
+        if not self._roi_drawing or self._temp_roi_item is None:
+            return
+            
+        current_pos = self.mapToScene(event.pos())
+        
+        # Calculate rectangle dimensions
+        x = min(self._roi_start_pos.x(), current_pos.x())
+        y = min(self._roi_start_pos.y(), current_pos.y())
+        width = abs(current_pos.x() - self._roi_start_pos.x())
+        height = abs(current_pos.y() - self._roi_start_pos.y())
+        
+        # Update temporary rectangle
+        new_rect = QRectF(x, y, width, height)
+        self._temp_roi_item.setRect(new_rect)
+
+    def _finish_roi_drawing(self, event: QMouseEvent):
+        """Completa il disegno del ROI."""
+        if not self._roi_drawing or self._temp_roi_item is None:
+            return
+            
+        # Get final rectangle
+        final_rect = self._temp_roi_item.rect()
+        
+        # Remove temporary item
+        self._scene.removeItem(self._temp_roi_item)
+        self._temp_roi_item = None
+        
+        # Reset drawing state
+        self._roi_drawing = False
+        self._roi_start_pos = None
+        
+        # Create ROI if rectangle is large enough
+        if final_rect.width() > 5 and final_rect.height() > 5:
+            self._create_roi_from_rect(final_rect)
+        
+        # Reset drawing tool in main window
+        if self._main_window:
+            self._main_window.deactivate_drawing_tools()
+        
+        print(f"Finished ROI drawing with rect: {final_rect}")
+
+    def _create_roi_from_rect(self, rect: QRectF):
+        """Crea un ROI dal rettangolo disegnato."""
+        if not self._main_window:
+            return
+            
+        # Import here to avoid circular imports
+        from analysis.roi_models import RectROI
+        from ui.roi_items import RectROIItem
+        
+        # Create ROI model
+        roi_model = RectROI(
+            x=rect.x(),
+            y=rect.y(),
+            width=rect.width(),
+            height=rect.height(),
+            name=f"ROI_{len(self._main_window.rois) + 1}"
+        )
+        
+        # Add emissivity attribute with default value
+        roi_model.emissivity = 0.95
+        
+        # Calculate statistics if temperature data is available
+        if (hasattr(self._main_window, 'temperature_data') and 
+            self._main_window.temperature_data is not None):
+            roi_model.calculate_statistics(self._main_window.temperature_data)
+        
+        # Create graphical item
+        roi_item = RectROIItem(roi_model)
+        
+        # Add to scene
+        self._scene.addItem(roi_item)
+        
+        # Add to main window collections
+        self._main_window.rois.append(roi_model)
+        self._main_window.roi_items[roi_model.id] = roi_item
+        
+        # Update main window ROI analysis
+        if hasattr(self._main_window, 'update_roi_analysis'):
+            self._main_window.update_roi_analysis()
+        else:
+            # Fallback to update table
+            if hasattr(self._main_window, 'update_roi_table'):
+                self._main_window.update_roi_table()
+        
+        print(f"Created ROI: {roi_model}")
+
     def get_zoom_factor(self) -> float:
         """Ritorna il fattore di zoom corrente."""
         return self._zoom_factor

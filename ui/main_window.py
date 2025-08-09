@@ -11,10 +11,11 @@ from PySide6.QtWidgets import (
     QMainWindow, QLabel, QVBoxLayout, QHBoxLayout, QWidget,
     QFileDialog, QMessageBox, QTextEdit, QSizePolicy, QLineEdit, QFormLayout,
     QGroupBox, QTabWidget, QToolBar, QComboBox, QSizePolicy as QSP,
-    QCheckBox, QPushButton, QSlider, QDoubleSpinBox, QSpinBox
+    QCheckBox, QPushButton, QSlider, QDoubleSpinBox, QSpinBox, QListWidget, QListWidgetItem,
+    QTableWidget, QTableWidgetItem, QHeaderView
 )
-from PySide6.QtGui import QAction, QPixmap, QImage, QIcon, QColor, QPen, QFontMetrics, QPainter
-from PySide6.QtCore import Qt, QRect, QPointF
+from PySide6.QtGui import QAction, QPixmap, QImage, QIcon, QColor, QPen, QFontMetrics, QPainter, QCursor
+from PySide6.QtCore import Qt, QRect, QPointF, QRectF
 
 from constants import PALETTE_MAP
 from .widgets.color_bar_legend import ColorBarLegend
@@ -158,11 +159,15 @@ class ThermalAnalyzerNG(QMainWindow):
         self.image_view = ImageGraphicsView()
         self.image_view.setStyleSheet("border: 1px solid gray; background-color: #333;")
         self.image_view.mouse_moved_on_thermal.connect(self.on_thermal_mouse_move)
+        # Set main window reference for ROI drawing
+        self.image_view.set_main_window(self)
         self.image_area_layout.addWidget(self.image_view, stretch=1)
         
         # Seconda immagine: ANCHE ImageGraphicsView per l'immagine visibile
         self.secondary_image_view = ImageGraphicsView()
         self.secondary_image_view.setStyleSheet("border: 1px solid gray; background-color: #222;")
+        # Also set main window reference for the secondary view
+        self.secondary_image_view.set_main_window(self)
         self.image_area_layout.addWidget(self.secondary_image_view, stretch=1)
         
         # Connetti i segnali di zoom/pan tra le due viste
@@ -230,11 +235,60 @@ class ThermalAnalyzerNG(QMainWindow):
         self.btn_spot = QPushButton("Spot")
         self.btn_rect = QPushButton("Rettangolo")
         self.btn_poly = QPushButton("Poligono")
+        
+        # Connect ROI drawing buttons
+        self.btn_rect.clicked.connect(self.activate_rect_tool)
+        
         _areas_tools.addWidget(self.btn_spot)
         _areas_tools.addWidget(self.btn_rect)
         _areas_tools.addWidget(self.btn_poly)
         _areas_tools.addStretch(1)
         self.tab_areas_layout.addWidget(self.areas_tools_widget)
+
+        # ROI Table
+        self.roi_table_group = QGroupBox("ROI Analysis")
+        self.roi_table_layout = QVBoxLayout(self.roi_table_group)
+        
+        # Create the table widget
+        self.roi_table = QTableWidget()
+        self.roi_table.setColumnCount(6)
+        
+        # Set column headers
+        headers = ["Nome", "Emissivity", "Min (°C)", "Max (°C)", "Avg (°C)", "Median (°C)"]
+        self.roi_table.setHorizontalHeaderLabels(headers)
+        
+        # Configure table properties
+        self.roi_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.roi_table.setAlternatingRowColors(True)
+        self.roi_table.setSortingEnabled(False)  # Disable sorting to maintain ROI order
+        
+        # Configure column widths
+        header = self.roi_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Nome - stretches to fill space
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Emissivity
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Min
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Max  
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Avg
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Median
+        
+        # Connect table selection signal
+        self.roi_table.itemSelectionChanged.connect(self.on_roi_table_selection_changed)
+        self.roi_table.itemChanged.connect(self.on_roi_table_item_changed)
+        
+        self.roi_table_layout.addWidget(self.roi_table)
+        
+        # ROI controls
+        roi_controls_layout = QHBoxLayout()
+        self.btn_delete_roi = QPushButton("Delete ROI")
+        self.btn_delete_roi.clicked.connect(self.delete_selected_roi)
+        self.btn_clear_all_roi = QPushButton("Clear All ROIs")
+        self.btn_clear_all_roi.clicked.connect(self.clear_all_rois)
+        roi_controls_layout.addWidget(self.btn_delete_roi)
+        roi_controls_layout.addWidget(self.btn_clear_all_roi)
+        roi_controls_layout.addStretch()
+        self.roi_table_layout.addLayout(roi_controls_layout)
+        
+        self.tab_areas_layout.addWidget(self.roi_table_group)
 
         self.sidebar_tabs.addTab(self.tab_areas, "Aree & Analisi")
 
@@ -318,6 +372,14 @@ class ThermalAnalyzerNG(QMainWindow):
         
         # Assicurati che la seconda vista sia visibile all'inizio
         self.secondary_image_view.setVisible(True)
+
+        # ROI management attributes
+        self.rois = []  # Lista per contenere i modelli ROI (es. RectROI)
+        self.roi_items = {}  # Mapping ROI ID -> RectROIItem per accesso rapido
+        self.current_drawing_tool = None  # Strumento di disegno attivo
+        self.roi_start_pos = None  # Posizione iniziale per il disegno
+        self.temp_roi_item = None  # Item temporaneo per feedback visivo durante il disegno
+        self.is_drawing_roi = False  # Flag per indicare se siamo in modalità disegno
 
     def open_image(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleziona Immagine FLIR", "", "Immagini JPEG (*.jpg *.jpeg)")
@@ -420,7 +482,7 @@ class ThermalAnalyzerNG(QMainWindow):
             self.display_images()
 
     def recalculate_and_update_view(self):
-        """Ricalcola la matrice delle temperature e aggiorna completamente la vista.
+        """Ricalcola la matrice delle temperatures e aggiorna completamente la vista.
         Da usare quando cambiano i parametri termici."""
         if self.thermal_data is None: 
             return
@@ -429,6 +491,11 @@ class ThermalAnalyzerNG(QMainWindow):
         self.create_colored_pixmap()
         self.update_legend()
         self.display_images()
+        
+        # Update ROI analysis after temperature recalculation
+        if len(self.rois) > 0:
+            print("Updating ROI analysis after temperature recalculation...")
+            self.update_roi_analysis()
 
     def update_view_only(self):
         """Aggiorna solo la visualizzazione usando i dati di temperatura già calcolati.
@@ -749,3 +816,262 @@ class ThermalAnalyzerNG(QMainWindow):
         """Sincronizza la vista primaria quando cambia quella secondaria."""
         if self.image_view.isVisible():
             self.image_view.sync_transform(zoom_factor, pan_offset, pixmap_size)
+
+    # === ROI Table Methods ===
+    
+    def update_roi_analysis(self):
+        """
+        Aggiorna l'analisi dei ROI dopo la creazione o modifica.
+        Itera sulla lista self.rois e calcola le statistiche per ogni ROI.
+        """
+        print(f"Updating ROI analysis for {len(self.rois)} ROIs...")
+        
+        # Iterate through all ROIs and calculate statistics
+        for roi_model in self.rois:
+            if self.temperature_data is not None:
+                # Call calculate_statistics method on each ROI model
+                roi_model.calculate_statistics(self.temperature_data)
+                print(f"Updated statistics for ROI: {roi_model.name}")
+            else:
+                # Clear statistics if no temperature data available
+                roi_model.temp_min = None
+                roi_model.temp_max = None
+                roi_model.temp_mean = None
+                roi_model.temp_std = None
+                print(f"Cleared statistics for ROI: {roi_model.name} (no temperature data)")
+        
+        # Update the ROI table with new data
+        self.update_roi_table()
+        
+        print(f"ROI analysis completed. Total ROIs: {len(self.rois)}")
+
+    def update_roi_table(self):
+        """
+        Aggiorna la tabella dei ROI con i dati correnti.
+        Cancella tutte le righe esistenti e poi popola la tabella con i dati aggiornati.
+        """
+        print("Updating ROI table...")
+        
+        # Clear all existing rows in the table
+        self.roi_table.setRowCount(0)
+        self.roi_table.clearContents()
+        
+        # Set the row count to match the number of ROIs
+        self.roi_table.setRowCount(len(self.rois))
+        
+        # Iterate through ROIs and populate table with updated data
+        for row, roi in enumerate(self.rois):
+            # Nome (editable)
+            name_item = QTableWidgetItem(roi.name)
+            name_item.setData(Qt.UserRole, roi.id)  # Store ROI ID for reference
+            self.roi_table.setItem(row, 0, name_item)
+            
+            # Emissivity (editable) - default to 0.95 if not set
+            emissivity_value = getattr(roi, 'emissivity', 0.95)
+            emissivity_item = QTableWidgetItem(f"{emissivity_value:.3f}")
+            self.roi_table.setItem(row, 1, emissivity_item)
+            
+            # Temperature statistics (read-only) - get from roi.stats (roi attributes)
+            if (hasattr(roi, 'temp_min') and roi.temp_min is not None and 
+                hasattr(roi, 'temp_max') and roi.temp_max is not None and
+                hasattr(roi, 'temp_mean') and roi.temp_mean is not None):
+                
+                min_item = QTableWidgetItem(f"{roi.temp_min:.2f}")
+                max_item = QTableWidgetItem(f"{roi.temp_max:.2f}")
+                avg_item = QTableWidgetItem(f"{roi.temp_mean:.2f}")
+                
+                # Calculate median from temperature data
+                median_value = self.calculate_roi_median(roi)
+                median_item = QTableWidgetItem(f"{median_value:.2f}" if median_value is not None else "N/A")
+            else:
+                # No statistics available
+                min_item = QTableWidgetItem("N/A")
+                max_item = QTableWidgetItem("N/A")
+                avg_item = QTableWidgetItem("N/A")
+                median_item = QTableWidgetItem("N/A")
+            
+            # Make temperature statistics read-only with gray background
+            for item in [min_item, max_item, avg_item, median_item]:
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                item.setBackground(QColor(240, 240, 240))  # Light gray background
+            
+            # Set items in table
+            self.roi_table.setItem(row, 2, min_item)  # Min
+            self.roi_table.setItem(row, 3, max_item)  # Max
+            self.roi_table.setItem(row, 4, avg_item)  # Avg
+            self.roi_table.setItem(row, 5, median_item)  # Median
+        
+        print(f"ROI table updated with {len(self.rois)} rows")
+
+    def calculate_roi_median(self, roi):
+        """Calcola la mediana delle temperature per un ROI."""
+        if self.temperature_data is None:
+            return None
+            
+        import numpy as np
+        
+        # Get integer bounds for array indexing
+        x1, y1 = int(roi.x), int(roi.y)
+        x2, y2 = int(roi.x + roi.width), int(roi.y + roi.height)
+        
+        # Ensure bounds are within array limits
+        height, width = self.temperature_data.shape
+        x1, x2 = max(0, x1), min(width, x2)
+        y1, y2 = max(0, y1), min(height, y2)
+        
+        if x1 >= x2 or y1 >= y2:
+            return None
+        
+        # Extract ROI region
+        roi_temps = self.temperature_data[y1:y2, x1:x2]
+        
+        # Remove NaN values
+        valid_temps = roi_temps[~np.isnan(roi_temps)]
+        
+        if len(valid_temps) == 0:
+            return None
+        else:
+            return float(np.median(valid_temps))
+
+    def on_roi_table_selection_changed(self):
+        """Gestisce il cambio di selezione nella tabella ROI."""
+        current_row = self.roi_table.currentRow()
+        if current_row >= 0 and current_row < len(self.rois):
+            roi = self.rois[current_row]
+            
+            # Highlight the corresponding ROI item in the graphics view
+            if roi.id in self.roi_items:
+                roi_item = self.roi_items[roi.id]
+                # Clear previous selection
+                for item in self.image_view._scene.selectedItems():
+                    item.setSelected(False)
+                # Select current ROI
+                roi_item.setSelected(True)
+                # Center view on ROI
+                self.image_view.centerOn(roi_item)
+
+    def on_roi_table_item_changed(self, item):
+        """Gestisce le modifiche agli elementi della tabella."""
+        if item is None:
+            return
+            
+        row = item.row()
+        col = item.column()
+        
+        if row >= len(self.rois):
+            return
+            
+        roi = self.rois[row]
+        
+        if col == 0:  # Nome
+            # Update ROI name
+            new_name = item.text().strip()
+            if new_name:
+                roi.name = new_name
+                print(f"Updated ROI name to: {new_name}")
+            else:
+                # Revert to previous name if empty
+                item.setText(roi.name)
+                
+        elif col == 1:  # Emissivity
+            # Update ROI emissivity
+            try:
+                new_emissivity = float(item.text())
+                if 0.0 <= new_emissivity <= 1.0:
+                    roi.emissivity = new_emissivity
+                    print(f"Updated ROI emissivity to: {new_emissivity}")
+                    # Recalculate statistics if needed (for future temperature calculations)
+                else:
+                    # Invalid range, revert
+                    emissivity_value = getattr(roi, 'emissivity', 0.95)
+                    item.setText(f"{emissivity_value:.3f}")
+                    QMessageBox.warning(self, "Invalid Emissivity", 
+                                      "Emissivity must be between 0.0 and 1.0")
+            except ValueError:
+                # Invalid number, revert
+                emissivity_value = getattr(roi, 'emissivity', 0.95)
+                item.setText(f"{emissivity_value:.3f}")
+                QMessageBox.warning(self, "Invalid Emissivity", 
+                                  "Please enter a valid number for emissivity")
+
+    def delete_selected_roi(self):
+        """Elimina il ROI selezionato dalla tabella."""
+        current_row = self.roi_table.currentRow()
+        if current_row < 0:
+            QMessageBox.information(self, "No Selection", "Please select a ROI to delete.")
+            return
+            
+        if current_row >= len(self.rois):
+            return
+            
+        roi = self.rois[current_row]
+        
+        # Remove from scene
+        if roi.id in self.roi_items:
+            roi_item = self.roi_items[roi.id]
+            self.image_view._scene.removeItem(roi_item)
+            del self.roi_items[roi.id]
+        
+        # Remove from model list
+        self.rois.pop(current_row)
+        
+        # Update analysis after deletion
+        self.update_roi_analysis()
+        
+        print(f"Deleted ROI: {roi.name}")
+
+    def clear_all_rois(self):
+        """Rimuove tutti i ROI."""
+        if not self.rois:
+            return
+            
+        # Confirm deletion
+        reply = QMessageBox.question(self, "Clear All ROIs", 
+                                   "Are you sure you want to delete all ROIs?",
+                                   QMessageBox.Yes | QMessageBox.No,
+                                   QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            # Remove all items from scene
+            for roi_item in self.roi_items.values():
+                self.image_view._scene.removeItem(roi_item)
+            
+            # Clear collections
+            self.rois.clear()
+            self.roi_items.clear()
+            
+            # Update analysis after clearing all ROIs
+            self.update_roi_analysis()
+            
+            print("Cleared all ROIs")
+
+    # === ROI Drawing Methods ===
+    
+    def activate_rect_tool(self):
+        """Attiva la modalità di disegno rettangolo."""
+        self.current_drawing_tool = "rect"
+        
+        # Update button appearance to show it's active
+        self.btn_rect.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        # Reset other buttons
+        self.btn_spot.setStyleSheet("")
+        self.btn_poly.setStyleSheet("")
+        
+        # Change cursor to crosshair for drawing mode
+        self.image_view.setCursor(QCursor(Qt.CrossCursor))
+        
+        print("Rectangle drawing mode activated - click and drag to create ROI")
+
+    def deactivate_drawing_tools(self):
+        """Disattiva tutti gli strumenti di disegno e ripristina lo stato normale."""
+        self.current_drawing_tool = None
+        
+        # Reset all button styles
+        self.btn_spot.setStyleSheet("")
+        self.btn_rect.setStyleSheet("")
+        self.btn_poly.setStyleSheet("")
+        
+        # Reset cursor
+        self.image_view.setCursor(QCursor(Qt.ArrowCursor))
+        
+        print("Drawing tools deactivated")
