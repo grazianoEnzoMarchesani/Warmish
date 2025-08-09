@@ -272,34 +272,40 @@ class ImageGraphicsView(QGraphicsView):
             self._fit_thermal_in_view()
     
     def sync_transform(self, zoom_factor: float, pan_offset: QPointF, source_pixmap_size: tuple = None):
-        """Sincronizza questa vista con un'altra, considerando le dimensioni relative delle immagini."""
+        """Sincronizza questa vista con un'altra, mantenendo zoom relativo uguale."""
         self._is_sync_source = False  # Evita loop
         
-        # Se abbiamo informazioni sulla dimensione dell'immagine sorgente, 
-        # calcoliamo un fattore di correzione
-        scale_correction = 1.0
+        # Invece di applicare direttamente il zoom_factor dell'altra vista,
+        # calcoliamo il "livello di zoom relativo" dell'altra vista e lo applichiamo qui
+        
         if source_pixmap_size is not None and not self._thermal_item.pixmap().isNull():
             source_w, source_h = source_pixmap_size
             current_pixmap = self._thermal_item.pixmap()
             current_w, current_h = current_pixmap.width(), current_pixmap.height()
             
-            # Calcola il rapporto tra le dimensioni delle due immagini
-            # Questo ci dice quanto più grande/piccola è l'immagine corrente rispetto alla sorgente
-            scale_ratio_x = current_w / source_w if source_w > 0 else 1.0
-            scale_ratio_y = current_h / source_h if source_h > 0 else 1.0
+            # Calcola il zoom "naturale" di base per ogni immagine
+            # Questo è il zoom che rende le immagini della stessa dimensione apparente
+            natural_zoom_source = 1.0  # La vista sorgente è il riferimento
+            natural_zoom_current = min(source_w / current_w, source_h / current_h) if current_w > 0 and current_h > 0 else 1.0
             
-            # Usa il rapporto più piccolo per mantenere l'aspect ratio
-            scale_correction = min(scale_ratio_x, scale_ratio_y)
-        
-        # Applica zoom con correzione della scala
-        corrected_zoom = zoom_factor * scale_correction
-        scale_factor = corrected_zoom / self._zoom_factor
-        
-        if abs(scale_factor - 1.0) > 0.001:  # Evita micro-aggiustamenti
-            self.scale(scale_factor, scale_factor)
-            self._zoom_factor = corrected_zoom
+            # Il zoom target per questa vista dovrebbe essere:
+            # il zoom naturale moltiplicato per il livello di zoom relativo della sorgente
+            source_relative_zoom = zoom_factor / natural_zoom_source  # Livello di zoom relativo della sorgente
+            target_zoom = natural_zoom_current * source_relative_zoom
             
-        # Applica pan (potrebbe anche aver bisogno di correzione in futuro)
+            # Applica il zoom target
+            scale_factor = target_zoom / self._zoom_factor
+            if abs(scale_factor - 1.0) > 0.001:  # Evita micro-aggiustamenti
+                self.scale(scale_factor, scale_factor)
+                self._zoom_factor = target_zoom
+        else:
+            # Fallback: applica direttamente il zoom factor (comportamento originale)
+            scale_factor = zoom_factor / self._zoom_factor
+            if abs(scale_factor - 1.0) > 0.001:
+                self.scale(scale_factor, scale_factor)
+                self._zoom_factor = zoom_factor
+            
+        # Applica pan
         current_transform = self.transform()
         new_transform = QTransform(current_transform)
         new_transform.setMatrix(
