@@ -4,7 +4,6 @@
 
 <div align="center">
   <img src="Warmish Logo.png" alt="Warmish Logo" width="250">
-  <h1>Warmish</h1>
   <p><em>Professional GUI application for thermal image analysis and visualization</em></p>
 </div>
 **Warmish** is a cross-platform graphical tool for analyzing radiometric thermal images (FLIR JPEG). It allows you to extract metadata, derive the temperature matrix, visualize thermal maps with customizable palettes, and work in overlay with the visible image. The interface is based on PySide6 (Qt) and includes interactive controls for zoom/pan, color legend, and calculation parameters.
