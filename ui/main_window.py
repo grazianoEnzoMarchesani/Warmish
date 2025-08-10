@@ -1044,34 +1044,3 @@ class ThermalAnalyzerNG(QMainWindow):
             self.update_roi_analysis()
             
             print("Cleared all ROIs")
-
-    # === ROI Drawing Methods ===
-    
-    def activate_rect_tool(self):
-        """Attiva la modalità di disegno rettangolo."""
-        self.current_drawing_tool = "rect"
-        
-        # Update button appearance to show it's active
-        self.btn_rect.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
-        # Reset other buttons
-        self.btn_spot.setStyleSheet("")
-        self.btn_poly.setStyleSheet("")
-        
-        # Change cursor to crosshair for drawing mode
-        self.image_view.setCursor(QCursor(Qt.CrossCursor))
-        
-        print("Rectangle drawing mode activated - click and drag to create ROI")
-
-    def deactivate_drawing_tools(self):
-        """Disattiva tutti gli strumenti di disegno e ripristina lo stato normale."""
-        self.current_drawing_tool = None
-        
-        # Reset all button styles
-        self.btn_spot.setStyleSheet("")
-        self.btn_rect.setStyleSheet("")
-        self.btn_poly.setStyleSheet("")
-        
-        # Reset cursor
-        self.image_view.setCursor(QCursor(Qt.ArrowCursor))
-        
-        print("Drawing tools deactivated")
