@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PySide6.QtGui import QAction, QPixmap, QImage, QIcon, QColor, QPen, QFontMetrics, QPainter, QCursor
-from PySide6.QtCore import Qt, QRect, QPointF, QRectF
+from PySide6.QtCore import Qt, QRect, QPointF, QRectF, QSignalBlocker
 
 from constants import PALETTE_MAP
 from .widgets.color_bar_legend import ColorBarLegend
@@ -380,6 +380,7 @@ class ThermalAnalyzerNG(QMainWindow):
         self.roi_start_pos = None  # Posizione iniziale per il disegno
         self.temp_roi_item = None  # Item temporaneo per feedback visivo durante il disegno
         self.is_drawing_roi = False  # Flag per indicare se siamo in modalità disegno
+        self._updating_roi_table = False
 
     def open_image(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleziona Immagine FLIR", "", "Immagini JPEG (*.jpg *.jpeg)")
@@ -824,21 +825,23 @@ class ThermalAnalyzerNG(QMainWindow):
         Aggiorna l'analisi dei ROI dopo la creazione o modifica.
         Itera sulla lista self.rois e calcola le statistiche per ogni ROI.
         """
+        import numpy as np
         print(f"Updating ROI analysis for {len(self.rois)} ROIs...")
         
         # Iterate through all ROIs and calculate statistics
         for roi_model in self.rois:
-            if self.temperature_data is not None:
-                # Call calculate_statistics method on each ROI model
-                roi_model.calculate_statistics(self.temperature_data)
-                print(f"Updated statistics for ROI: {roi_model.name}")
+            temps = self.compute_roi_temperatures(roi_model)
+            if temps is not None:
+                valid = temps[~np.isnan(temps)]
+                if valid.size > 0:
+                    roi_model.temp_min = float(np.min(valid))
+                    roi_model.temp_max = float(np.max(valid))
+                    roi_model.temp_mean = float(np.mean(valid))
+                    roi_model.temp_std = float(np.std(valid))
+                else:
+                    roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
             else:
-                # Clear statistics if no temperature data available
-                roi_model.temp_min = None
-                roi_model.temp_max = None
-                roi_model.temp_mean = None
-                roi_model.temp_std = None
-                print(f"Cleared statistics for ROI: {roi_model.name} (no temperature data)")
+                roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
         
         # Update the ROI table with new data
         self.update_roi_table()
@@ -851,87 +854,63 @@ class ThermalAnalyzerNG(QMainWindow):
         Cancella tutte le righe esistenti e poi popola la tabella con i dati aggiornati.
         """
         print("Updating ROI table...")
-        
-        # Clear all existing rows in the table
-        self.roi_table.setRowCount(0)
-        self.roi_table.clearContents()
-        
-        # Set the row count to match the number of ROIs
-        self.roi_table.setRowCount(len(self.rois))
-        
-        # Iterate through ROIs and populate table with updated data
-        for row, roi in enumerate(self.rois):
-            # Nome (editable)
-            name_item = QTableWidgetItem(roi.name)
-            name_item.setData(Qt.UserRole, roi.id)  # Store ROI ID for reference
-            self.roi_table.setItem(row, 0, name_item)
-            
-            # Emissivity (editable) - default to 0.95 if not set
-            emissivity_value = getattr(roi, 'emissivity', 0.95)
-            emissivity_item = QTableWidgetItem(f"{emissivity_value:.3f}")
-            self.roi_table.setItem(row, 1, emissivity_item)
-            
-            # Temperature statistics (read-only) - get from roi.stats (roi attributes)
-            if (hasattr(roi, 'temp_min') and roi.temp_min is not None and 
-                hasattr(roi, 'temp_max') and roi.temp_max is not None and
-                hasattr(roi, 'temp_mean') and roi.temp_mean is not None):
-                
-                min_item = QTableWidgetItem(f"{roi.temp_min:.2f}")
-                max_item = QTableWidgetItem(f"{roi.temp_max:.2f}")
-                avg_item = QTableWidgetItem(f"{roi.temp_mean:.2f}")
-                
-                # Calculate median from temperature data
-                median_value = self.calculate_roi_median(roi)
-                median_item = QTableWidgetItem(f"{median_value:.2f}" if median_value is not None else "N/A")
-            else:
-                # No statistics available
-                min_item = QTableWidgetItem("N/A")
-                max_item = QTableWidgetItem("N/A")
-                avg_item = QTableWidgetItem("N/A")
-                median_item = QTableWidgetItem("N/A")
-            
-            # Make temperature statistics read-only with gray background
-            for item in [min_item, max_item, avg_item, median_item]:
-                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                item.setBackground(QColor(240, 240, 240))  # Light gray background
-            
-            # Set items in table
-            self.roi_table.setItem(row, 2, min_item)  # Min
-            self.roi_table.setItem(row, 3, max_item)  # Max
-            self.roi_table.setItem(row, 4, avg_item)  # Avg
-            self.roi_table.setItem(row, 5, median_item)  # Median
-        
-        print(f"ROI table updated with {len(self.rois)} rows")
+        self._updating_roi_table = True
+        try:
+            # blocca tutti i segnali della tabella durante l’aggiornamento
+            blocker = QSignalBlocker(self.roi_table)
+
+            self.roi_table.setRowCount(0)
+            self.roi_table.clearContents()
+            self.roi_table.setRowCount(len(self.rois))
+
+            for row, roi in enumerate(self.rois):
+                name_item = QTableWidgetItem(roi.name)
+                name_item.setData(Qt.UserRole, roi.id)
+                self.roi_table.setItem(row, 0, name_item)
+
+                emissivity_value = getattr(roi, 'emissivity', 0.95)
+                emissivity_item = QTableWidgetItem(f"{emissivity_value:.3f}")
+                self.roi_table.setItem(row, 1, emissivity_item)
+
+                if (hasattr(roi, 'temp_min') and roi.temp_min is not None and 
+                    hasattr(roi, 'temp_max') and roi.temp_max is not None and
+                    hasattr(roi, 'temp_mean') and roi.temp_mean is not None):
+                    min_item = QTableWidgetItem(f"{roi.temp_min:.2f}")
+                    max_item = QTableWidgetItem(f"{roi.temp_max:.2f}")
+                    avg_item = QTableWidgetItem(f"{roi.temp_mean:.2f}")
+                    median_value = self.calculate_roi_median(roi)
+                    median_item = QTableWidgetItem(f"{median_value:.2f}" if median_value is not None else "N/A")
+                else:
+                    min_item = QTableWidgetItem("N/A")
+                    max_item = QTableWidgetItem("N/A")
+                    avg_item = QTableWidgetItem("N/A")
+                    median_item = QTableWidgetItem("N/A")
+
+                for item in [min_item, max_item, avg_item, median_item]:
+                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                    item.setBackground(QColor(240, 240, 240))
+
+                self.roi_table.setItem(row, 2, min_item)
+                self.roi_table.setItem(row, 3, max_item)
+                self.roi_table.setItem(row, 4, avg_item)
+                self.roi_table.setItem(row, 5, median_item)
+
+            print(f"ROI table updated with {len(self.rois)} rows")
+        finally:
+            # rilascia il blocker e riabilita i segnali
+            del blocker
+            self._updating_roi_table = False
 
     def calculate_roi_median(self, roi):
         """Calcola la mediana delle temperature per un ROI."""
-        if self.temperature_data is None:
-            return None
-            
         import numpy as np
-        
-        # Get integer bounds for array indexing
-        x1, y1 = int(roi.x), int(roi.y)
-        x2, y2 = int(roi.x + roi.width), int(roi.y + roi.height)
-        
-        # Ensure bounds are within array limits
-        height, width = self.temperature_data.shape
-        x1, x2 = max(0, x1), min(width, x2)
-        y1, y2 = max(0, y1), min(height, y2)
-        
-        if x1 >= x2 or y1 >= y2:
+        temps = self.compute_roi_temperatures(roi)
+        if temps is None:
             return None
-        
-        # Extract ROI region
-        roi_temps = self.temperature_data[y1:y2, x1:x2]
-        
-        # Remove NaN values
-        valid_temps = roi_temps[~np.isnan(roi_temps)]
-        
-        if len(valid_temps) == 0:
+        valid = temps[~np.isnan(temps)]
+        if valid.size == 0:
             return None
-        else:
-            return float(np.median(valid_temps))
+        return float(np.median(valid))
 
     def on_roi_table_selection_changed(self):
         """Gestisce il cambio di selezione nella tabella ROI."""
@@ -952,7 +931,7 @@ class ThermalAnalyzerNG(QMainWindow):
 
     def on_roi_table_item_changed(self, item):
         """Gestisce le modifiche agli elementi della tabella."""
-        if item is None:
+        if item is None or self._updating_roi_table:
             return
             
         row = item.row()
@@ -974,13 +953,13 @@ class ThermalAnalyzerNG(QMainWindow):
                 item.setText(roi.name)
                 
         elif col == 1:  # Emissivity
-            # Update ROI emissivity
             try:
                 new_emissivity = float(item.text())
                 if 0.0 <= new_emissivity <= 1.0:
                     roi.emissivity = new_emissivity
                     print(f"Updated ROI emissivity to: {new_emissivity}")
-                    # Recalculate statistics if needed (for future temperature calculations)
+                    # Ricalcola statistiche con emissività per-ROI
+                    self.update_roi_analysis()
                 else:
                     # Invalid range, revert
                     emissivity_value = getattr(roi, 'emissivity', 0.95)
@@ -1044,3 +1023,58 @@ class ThermalAnalyzerNG(QMainWindow):
             self.update_roi_analysis()
             
             print("Cleared all ROIs")
+
+    def activate_rect_tool(self):
+        self.current_drawing_tool = "rect"
+        if hasattr(self, "image_view"):
+            self.image_view.setCursor(Qt.CrossCursor)
+
+    def deactivate_drawing_tools(self):
+        self.current_drawing_tool = None
+        if hasattr(self, "image_view"):
+            self.image_view.setCursor(Qt.ArrowCursor)
+
+    def compute_roi_temperatures(self, roi):
+        import numpy as np
+        if self.thermal_data is None or not hasattr(self, "image_view"):
+            return None
+
+        # Mappa i due angoli del ROI dalle coordinate di scena a quelle dell'item termico (pixel)
+        tl_scene = QPointF(float(roi.x), float(roi.y))
+        br_scene = QPointF(float(roi.x + roi.width), float(roi.y + roi.height))
+        tl_img = self.image_view._thermal_item.mapFromScene(tl_scene)
+        br_img = self.image_view._thermal_item.mapFromScene(br_scene)
+
+        x1 = int(np.floor(min(tl_img.x(), br_img.x())))
+        y1 = int(np.floor(min(tl_img.y(), br_img.y())))
+        x2 = int(np.ceil(max(tl_img.x(), br_img.x())))
+        y2 = int(np.ceil(max(tl_img.y(), br_img.y())))
+
+        # Clamp ai limiti dell’immagine
+        h, w = self.thermal_data.shape
+        x1, x2 = max(0, x1), min(w, x2)
+        y1, y2 = max(0, y1), min(h, y2)
+        if x1 >= x2 or y1 >= y2:
+            return None
+
+        thermal_roi = self.thermal_data[y1:y2, x1:x2].astype(np.float64)
+
+        # Parametri e emissività per-ROI
+        emissivity = float(getattr(roi, 'emissivity', 0.95))
+        refl_temp_C = float(self.param_inputs["ReflectedApparentTemperature"].text())
+        R1 = float(self.param_inputs["PlanckR1"].text())
+        R2 = float(self.param_inputs["PlanckR2"].text())
+        B  = float(self.param_inputs["PlanckB"].text())
+        F  = float(self.param_inputs["PlanckF"].text())
+        O  = float(self.param_inputs["PlanckO"].text())
+
+        # Stessa formula del globale, ma sul blocco ROI con emissività del ROI
+        refl_temp_K = refl_temp_C + 273.15
+        raw_refl = R1 / (R2 * (np.exp(B / refl_temp_K) - F)) - O
+        raw_obj = (thermal_roi - (1 - emissivity) * raw_refl) / max(emissivity, 1e-6)  # evita div/0
+
+        log_arg = R1 / (R2 * (raw_obj + O)) + F
+        temp_K = np.full(log_arg.shape, np.nan, dtype=np.float64)
+        valid = log_arg > 0
+        temp_K[valid] = B / np.log(log_arg[valid])
+        return temp_K - 273.15
