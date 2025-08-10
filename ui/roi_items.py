@@ -28,7 +28,7 @@ class RectROIItem(QGraphicsRectItem):
             parent: Optional parent QGraphicsItem
         """
         # Initialize the parent QGraphicsRectItem with the geometry from the model
-        rect = QRectF(model.x, model.y, model.width, model.height)
+        rect = QRectF(0, 0, model.width, model.height)
         super().__init__(rect, parent)
         
         # Store reference to the model
@@ -41,6 +41,8 @@ class RectROIItem(QGraphicsRectItem):
         
         # Set visual appearance
         self._setup_appearance()
+        self.setZValue(10)  # ROI sempre sopra le immagini
+        self.setPos(model.x, model.y)
     
     def _setup_appearance(self):
         """Set up the visual appearance of the ROI item."""
@@ -82,11 +84,8 @@ class RectROIItem(QGraphicsRectItem):
         has been modified externally.
         """
         # Update the rectangle geometry
-        new_rect = QRectF(self.model.x, self.model.y, self.model.width, self.model.height)
-        self.setRect(new_rect)
-        
-        # Reset position to match model (in case it was changed externally)
-        self.setPos(0, 0)  # Reset position since coordinates are in the rect itself
+        self.setRect(QRectF(0, 0, self.model.width, self.model.height))
+        self.setPos(self.model.x, self.model.y)
     
     def get_model_id(self):
         """

@@ -168,6 +168,7 @@ class ThermalAnalyzerNG(QMainWindow):
         self.secondary_image_view.setStyleSheet("border: 1px solid gray; background-color: #222;")
         # Also set main window reference for the secondary view
         self.secondary_image_view.set_main_window(self)
+        self.secondary_image_view.set_allow_roi_drawing(False)
         self.image_area_layout.addWidget(self.secondary_image_view, stretch=1)
         
         # Connetti i segnali di zoom/pan tra le due viste
@@ -1039,27 +1040,28 @@ class ThermalAnalyzerNG(QMainWindow):
         if self.thermal_data is None or not hasattr(self, "image_view"):
             return None
 
-        # Mappa i due angoli del ROI dalle coordinate di scena a quelle dell'item termico (pixel)
-        tl_scene = QPointF(float(roi.x), float(roi.y))
-        br_scene = QPointF(float(roi.x + roi.width), float(roi.y + roi.height))
-        tl_img = self.image_view._thermal_item.mapFromScene(tl_scene)
-        br_img = self.image_view._thermal_item.mapFromScene(br_scene)
+        # Rettangolo del ROI nel sistema dell'item termico
+        rect = None
+        item = self.roi_items.get(roi.id)
+        if item is not None and item.parentItem() is not self.image_view._thermal_item:
+            # ROI non sulla termica primaria → non calcolabile
+            return None
+        else:
+            # fallback per ROI “legacy”: mappa modello scena->termico
+            tl_img = self.image_view._thermal_item.mapFromScene(QPointF(float(roi.x), float(roi.y)))
+            br_img = self.image_view._thermal_item.mapFromScene(QPointF(float(roi.x + roi.width), float(roi.y + roi.height)))
+            rect = QRectF(tl_img, br_img).normalized()
 
-        x1 = int(np.floor(min(tl_img.x(), br_img.x())))
-        y1 = int(np.floor(min(tl_img.y(), br_img.y())))
-        x2 = int(np.ceil(max(tl_img.x(), br_img.x())))
-        y2 = int(np.ceil(max(tl_img.y(), br_img.y())))
-
-        # Clamp ai limiti dell’immagine
         h, w = self.thermal_data.shape
-        x1, x2 = max(0, x1), min(w, x2)
-        y1, y2 = max(0, y1), min(h, y2)
+        x1 = max(0, int(np.floor(rect.left())))
+        y1 = max(0, int(np.floor(rect.top())))
+        x2 = min(w, int(np.ceil(rect.right())))
+        y2 = min(h, int(np.ceil(rect.bottom())))
         if x1 >= x2 or y1 >= y2:
             return None
 
         thermal_roi = self.thermal_data[y1:y2, x1:x2].astype(np.float64)
 
-        # Parametri e emissività per-ROI
         emissivity = float(getattr(roi, 'emissivity', 0.95))
         refl_temp_C = float(self.param_inputs["ReflectedApparentTemperature"].text())
         R1 = float(self.param_inputs["PlanckR1"].text())
@@ -1068,10 +1070,9 @@ class ThermalAnalyzerNG(QMainWindow):
         F  = float(self.param_inputs["PlanckF"].text())
         O  = float(self.param_inputs["PlanckO"].text())
 
-        # Stessa formula del globale, ma sul blocco ROI con emissività del ROI
         refl_temp_K = refl_temp_C + 273.15
         raw_refl = R1 / (R2 * (np.exp(B / refl_temp_K) - F)) - O
-        raw_obj = (thermal_roi - (1 - emissivity) * raw_refl) / max(emissivity, 1e-6)  # evita div/0
+        raw_obj = (thermal_roi - (1 - emissivity) * raw_refl) / max(emissivity, 1e-6)
 
         log_arg = R1 / (R2 * (raw_obj + O)) + F
         temp_K = np.full(log_arg.shape, np.nan, dtype=np.float64)

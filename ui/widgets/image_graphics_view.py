@@ -97,6 +97,12 @@ class ImageGraphicsView(QGraphicsView):
         self._roi_start_pos = None
         self._temp_roi_item = None
         
+        # Flag per abilitare/disabilitare il disegno ROI
+        self._allow_roi_drawing = True
+
+    def set_allow_roi_drawing(self, allowed: bool):
+        self._allow_roi_drawing = allowed
+
     def set_thermal_pixmap(self, pixmap: QPixmap):
         """Imposta l'immagine termica."""
         if pixmap is None or pixmap.isNull():
@@ -368,6 +374,7 @@ class ImageGraphicsView(QGraphicsView):
         if (self._main_window and 
             hasattr(self._main_window, 'current_drawing_tool') and 
             self._main_window.current_drawing_tool == "rect" and 
+            self._allow_roi_drawing and                 # <— solo se abilitato
             event.button() == Qt.LeftButton):
             
             # Start ROI drawing
@@ -435,6 +442,7 @@ class ImageGraphicsView(QGraphicsView):
             QPen(QColor(255, 165, 0), 2),  # Orange pen
             QBrush(QColor(255, 165, 0, 40))  # Semi-transparent orange
         )
+        self._temp_roi_item.setZValue(10)  # rettangolo temporaneo sopra
         print(f"Started ROI drawing at: {scene_pos}")
 
     def _update_roi_drawing(self, event: QMouseEvent):
@@ -489,40 +497,32 @@ class ImageGraphicsView(QGraphicsView):
         from analysis.roi_models import RectROI
         from ui.roi_items import RectROIItem
         
-        # Create ROI model
-        roi_model = RectROI(
-            x=rect.x(),
-            y=rect.y(),
-            width=rect.width(),
-            height=rect.height(),
-            name=f"ROI_{len(self._main_window.rois) + 1}"
-        )
-        
-        # Add emissivity attribute with default value
+        # 1) mappa i vertici del rettangolo da SCENA -> coordinate locali di _thermal_item (pixel termici)
+        tl_img = self._thermal_item.mapFromScene(rect.topLeft())
+        br_img = self._thermal_item.mapFromScene(rect.bottomRight())
+
+        x = min(tl_img.x(), br_img.x())
+        y = min(tl_img.y(), br_img.y())
+        w = abs(br_img.x() - tl_img.x())
+        h = abs(br_img.y() - tl_img.y())
+
+        # 2) crea il modello con coordinate nell’immagine termica
+        roi_model = RectROI(x=x, y=y, width=w, height=h, name=f"ROI_{len(self._main_window.rois)+1}")
         roi_model.emissivity = 0.95
-        
-        # Calculate statistics if temperature data is available
-        if (hasattr(self._main_window, 'temperature_data') and 
-            self._main_window.temperature_data is not None):
-            roi_model.calculate_statistics(self._main_window.temperature_data)
-        
-        # Create graphical item
-        roi_item = RectROIItem(roi_model)
-        
-        # Add to scene
-        self._scene.addItem(roi_item)
-        
-        # Add to main window collections
+
+        # 3) crea l’item grafico come FIGLIO dell’item termico
+        roi_item = RectROIItem(roi_model, parent=self._thermal_item)
+        roi_item.setZValue(10)
+
+        # 4) NON aggiungere alla scena (è figlio dell’item già nella scena)
+        # self._scene.addItem(roi_item)  <-- rimuovi/evita
+
+        # 5) registra nelle collezioni
         self._main_window.rois.append(roi_model)
         self._main_window.roi_items[roi_model.id] = roi_item
-        
-        # Update main window ROI analysis
-        if hasattr(self._main_window, 'update_roi_analysis'):
-            self._main_window.update_roi_analysis()
-        else:
-            # Fallback to update table
-            if hasattr(self._main_window, 'update_roi_table'):
-                self._main_window.update_roi_table()
+
+        # 6) aggiorna analisi/tabella
+        self._main_window.update_roi_analysis()
         
         print(f"Created ROI: {roi_model}")
 
