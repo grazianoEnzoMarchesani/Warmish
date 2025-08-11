@@ -5,10 +5,10 @@ This module contains QGraphicsItem-based classes for visually representing
 ROIs (Regions of Interest) in a QGraphicsScene.
 """
 
-from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem, QGraphicsTextItem, QCheckBox, QHBoxLayout, QLabel, QGraphicsEllipseItem
-from PySide6.QtGui import QPen, QBrush, QColor, QCursor
+from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem, QGraphicsTextItem, QCheckBox, QHBoxLayout, QLabel, QGraphicsEllipseItem, QGraphicsPolygonItem
+from PySide6.QtGui import QPen, QBrush, QColor, QCursor, QPolygonF
 from PySide6.QtCore import Qt, QRectF, QPointF
-from analysis.roi_models import RectROI, SpotROI
+from analysis.roi_models import RectROI, SpotROI, PolygonROI
 
 
 class RectROIItem(QGraphicsRectItem):
@@ -566,4 +566,227 @@ class SpotROIItem(QGraphicsEllipseItem):
         # Position label above the circle with small offset
         label_x = -self.label.boundingRect().width() / 2
         label_y = -self.model.radius - self.label.boundingRect().height() - 2
+        self.label.setPos(label_x, label_y)
+
+
+class PolygonROIItem(QGraphicsPolygonItem):
+    """
+    Graphical representation of a polygon ROI for use in QGraphicsScene.
+    
+    This class provides visual representation and interactive capabilities
+    for PolygonROI model objects within a QGraphicsView/QGraphicsScene framework.
+    """
+    
+    def __init__(self, model: PolygonROI, parent=None):
+        """
+        Initialize the graphical polygon ROI item.
+        
+        Args:
+            model: PolygonROI instance containing the ROI data and coordinates
+            parent: Optional parent QGraphicsItem
+        """
+        
+        # Create QPolygonF from model points
+        qt_polygon = QPolygonF()
+        for x, y in model.points:
+            qt_polygon.append(QPointF(x, y))
+        
+        super().__init__(qt_polygon, parent)
+        
+        # Store reference to the model
+        self.model = model
+        
+        # Set interaction flags
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        
+        # Set visual appearance
+        self._setup_appearance()
+        self.setZValue(10)  # ROI sempre sopra le immagini
+        self.setAcceptHoverEvents(True)
+        
+        # Editing state
+        self._editing_vertices = False
+        self._selected_vertex = -1
+        self._vertex_radius = 5  # Raggio dei cerchietti per i vertici
+        
+        # Colore iniziale (dal modello se presente)
+        self._color = getattr(self.model, "color", QColor(255, 165, 0))
+        self._apply_color(self._color)
+        
+        # Label: nome + statistiche; non scala con lo zoom
+        self.label = QGraphicsTextItem("", self)
+        self.label.setDefaultTextColor(Qt.white)
+        self.label.setZValue(self.zValue() + 1)
+        self.label.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self.refresh_label()
+        self._update_label_pos()
+    
+    def _setup_appearance(self):
+        """Set up the visual appearance of the polygon ROI item."""
+        # Create orange pen for the border (2px thickness)
+        pen = QPen(QColor(255, 165, 0), 2)  # Orange color
+        pen.setStyle(Qt.SolidLine)
+        self.setPen(pen)
+        
+        # Create semi-transparent orange brush for fill
+        brush_color = QColor(255, 165, 0, 40)  # Orange with ~15% opacity (40/255)
+        brush = QBrush(brush_color)
+        self.setBrush(brush)
+    
+    def itemChange(self, change, value):
+        """Handle item changes, specifically position changes to sync with model."""
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            # Update the model coordinates when the item is moved
+            offset = value
+            # Update all points in the model
+            original_polygon = self.polygon()
+            for i, point in enumerate(self.model.points):
+                new_point = original_polygon[i] + offset
+                self.model.points[i] = (new_point.x(), new_point.y())
+        
+        return super().itemChange(change, value)
+    
+    def update_from_model(self):
+        """Update the graphical representation from the model data."""
+        
+        # Update the polygon geometry
+        qt_polygon = QPolygonF()
+        for x, y in self.model.points:
+            qt_polygon.append(QPointF(x, y))
+        self.setPolygon(qt_polygon)
+        self._update_label_pos()
+    
+    def get_model_id(self):
+        """Get the unique ID of the associated model."""
+        return self.model.id
+    
+    def get_model_name(self):
+        """Get the name of the associated model."""
+        return self.model.name
+
+    def _get_vertex_at(self, pos: QPointF):
+        """Check if position is near a vertex."""
+        polygon = self.polygon()
+        for i in range(polygon.size()):
+            vertex = polygon[i]
+            distance = ((pos.x() - vertex.x()) ** 2 + (pos.y() - vertex.y()) ** 2) ** 0.5
+            if distance <= self._vertex_radius:
+                return i
+        return -1
+
+    def hoverMoveEvent(self, event):
+        """Handle hover events to show appropriate cursor for vertices."""
+        vertex_idx = self._get_vertex_at(event.pos())
+        if vertex_idx >= 0:
+            self.setCursor(QCursor(Qt.SizeAllCursor))
+        else:
+            self.setCursor(QCursor(Qt.ArrowCursor))
+        super().hoverMoveEvent(event)
+
+    def mousePressEvent(self, event):
+        """Handle mouse press events for vertex editing and move operations."""
+        if event.button() == Qt.LeftButton:
+            vertex_idx = self._get_vertex_at(event.pos())
+            if vertex_idx >= 0:
+                # Start vertex editing
+                self._editing_vertices = True
+                self._selected_vertex = vertex_idx
+                event.accept()
+                return
+        
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move events for vertex editing."""
+        if self._editing_vertices and self._selected_vertex >= 0:
+            # Update the vertex position
+            polygon = self.polygon()
+            polygon[self._selected_vertex] = event.pos()
+            self.setPolygon(polygon)
+            
+            # Update model
+            self.model.points[self._selected_vertex] = (event.pos().x(), event.pos().y())
+            self._update_label_pos()
+            event.accept()
+            return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release events."""
+        if self._editing_vertices and event.button() == Qt.LeftButton:
+            self._editing_vertices = False
+            self._selected_vertex = -1
+            # Notify model changed
+            self._notify_model_changed()
+            event.accept()
+            return
+        
+        # se era un semplice move, ricalcola qui
+        if event.button() == Qt.LeftButton:
+            self._notify_model_changed()
+        super().mouseReleaseEvent(event)
+
+    def _notify_model_changed(self):
+        """Notify that the model has changed and needs recalculation."""
+        # Notify main window for recalculation
+        view_list = self.scene().views()
+        if view_list:
+            view = view_list[0]
+            if hasattr(view, "_main_window") and hasattr(view._main_window, "update_single_roi"):
+                view._main_window.update_single_roi(self.model)
+    
+    def _apply_color(self, color: QColor):
+        """Apply color to the polygon ROI."""
+        pen = QPen(color, 2)
+        pen.setStyle(Qt.SolidLine)
+        self.setPen(pen)
+        fill = QColor(color)
+        fill.setAlpha(40)
+        self.setBrush(QBrush(fill))
+    
+    def set_color(self, color: QColor):
+        """Set the color of the polygon ROI."""
+        self._color = color
+        setattr(self.model, "color", color)
+        self._apply_color(color)
+    
+    def refresh_label(self):
+        """Refresh the label text with current statistics."""
+        m = self.model
+        # Recupera le impostazioni dalla MainWindow
+        settings = {
+            "name": True, "emissivity": True, "min": True, "max": True, "avg": True, "median": False
+        }
+        views = self.scene().views()
+        if views:
+            mw = getattr(views[0], "_main_window", None)
+            if mw and hasattr(mw, "roi_label_settings"):
+                settings = mw.roi_label_settings
+
+        def fmt(v): return f"{v:.2f}" if (v is not None) else "N/A"
+        parts1 = []
+        if settings.get("name", True): parts1.append(m.name)
+        if settings.get("emissivity", True): parts1.append(f"ε {getattr(m, 'emissivity', 0.95):.3f}")
+        line1 = " | ".join(parts1)
+
+        parts2 = []
+        if settings.get("min", True): parts2.append(f"min {fmt(getattr(m, 'temp_min', None))}")
+        if settings.get("max", True): parts2.append(f"max {fmt(getattr(m, 'temp_max', None))}")
+        if settings.get("avg", True): parts2.append(f"avg {fmt(getattr(m, 'temp_mean', None))}")
+        if settings.get("median", False): parts2.append(f"med {fmt(getattr(m, 'temp_median', None))}")
+        line2 = " | ".join(parts2)
+
+        text = line1 if line2 == "" else f"{line1}\n{line2}"
+        self.label.setPlainText(text)
+        self._update_label_pos()
+    
+    def _update_label_pos(self):
+        """Update the label position relative to the polygon."""
+        # Position label at the center of the bounding box
+        bbox = self.polygon().boundingRect()
+        label_x = bbox.center().x() - self.label.boundingRect().width() / 2
+        label_y = bbox.top() - self.label.boundingRect().height() - 2
         self.label.setPos(label_x, label_y)

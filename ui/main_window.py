@@ -245,6 +245,7 @@ class ThermalAnalyzerNG(QMainWindow):
         # Connect ROI drawing buttons
         self.btn_rect.clicked.connect(self.activate_rect_tool)
         self.btn_spot.clicked.connect(self.activate_spot_tool)
+        self.btn_poly.clicked.connect(self.activate_polygon_tool)
         
         _areas_tools.addWidget(self.btn_spot)
         _areas_tools.addWidget(self.btn_rect)
@@ -635,7 +636,13 @@ class ThermalAnalyzerNG(QMainWindow):
         if 0 <= matrix_x < img_w and 0 <= matrix_y < img_h:
             temperature = self.temperature_data[matrix_y, matrix_x]
             if not np.isnan(temperature):
-                self.temp_tooltip_label.setText(f"{temperature:.2f} °C")
+                # Ottieni l'emissività dai parametri
+                try:
+                    emissivity = float(self.param_inputs["Emissivity"].text())
+                    self.temp_tooltip_label.setText(f"{temperature:.2f} °C | ε: {emissivity:.3f}")
+                except (ValueError, KeyError):
+                    # Fallback se non riesce a leggere l'emissività
+                    self.temp_tooltip_label.setText(f"{temperature:.2f} °C")
                 
                 # Posiziona il tooltip vicino al cursore
                 cursor_pos = self.image_view.mapFromGlobal(self.cursor().pos())
@@ -1095,6 +1102,25 @@ class ThermalAnalyzerNG(QMainWindow):
         self.btn_poly.setChecked(False)
         self.btn_rect.setChecked(True)
 
+    def activate_polygon_tool(self):
+        """Attiva lo strumento per creare poligoni ROI."""
+        self.current_drawing_tool = "polygon"
+        if hasattr(self, "image_view"):
+            self.image_view.setCursor(Qt.CrossCursor)
+            # Assicura che la vista abbia il focus per ricevere eventi tastiera
+            self.image_view.setFocus()
+        
+        # Reset altri pulsanti e attiva questo
+        self.btn_spot.setChecked(False)
+        self.btn_rect.setChecked(False)
+        self.btn_poly.setChecked(True)
+        
+        print("🔶 Modalità Poligono attivata!")
+        print("   • Click sinistro: Aggiungi punto")
+        print("   • INVIO o Doppio-click: Completa poligono") 
+        print("   • Click destro: Completa poligono")
+        print("   • ESC: Annulla")
+
     def deactivate_drawing_tools(self):
         """Disattiva tutti gli strumenti di disegno."""
         self.current_drawing_tool = None
@@ -1106,11 +1132,13 @@ class ThermalAnalyzerNG(QMainWindow):
             self.btn_spot.setChecked(False)
         if hasattr(self, "btn_rect"):
             self.btn_rect.setChecked(False)
+        if hasattr(self, "btn_poly"):
+            self.btn_poly.setChecked(False)
 
     def compute_roi_temperatures(self, roi):
         import numpy as np
         from PySide6.QtCore import QRectF, QPointF
-        from analysis.roi_models import SpotROI
+        from analysis.roi_models import SpotROI, PolygonROI
 
         if self.thermal_data is None or not hasattr(self, "image_view"):
             return None
@@ -1133,6 +1161,31 @@ class ThermalAnalyzerNG(QMainWindow):
             mask = ((x_indices - roi.x) ** 2 + (y_indices - roi.y) ** 2) <= (roi.radius ** 2)
             
             # Estrai solo i pixel del cerchio
+            thermal_roi = self.thermal_data[y1:y2, x1:x2].astype(np.float64)
+            thermal_roi = thermal_roi[mask]
+            
+            if thermal_roi.size == 0:
+                return None
+                
+        elif isinstance(roi, PolygonROI):
+            # Per poligoni ROI, crea una maschera poligonale
+            h, w = self.thermal_data.shape
+            
+            # Bounds del poligono
+            x1, y1, x2, y2 = roi.get_bounds()
+            x1, y1 = max(0, int(x1)), max(0, int(y1))
+            x2, y2 = min(w, int(x2)), min(h, int(y2))
+            
+            if x1 >= x2 or y1 >= y2:
+                return None
+            
+            # Crea maschera poligonale
+            mask = np.zeros((y2 - y1, x2 - x1), dtype=bool)
+            for i in range(y2 - y1):
+                for j in range(x2 - x1):
+                    mask[i, j] = roi.contains_point(x1 + j, y1 + i)
+            
+            # Estrai solo i pixel del poligono
             thermal_roi = self.thermal_data[y1:y2, x1:x2].astype(np.float64)
             thermal_roi = thermal_roi[mask]
             
@@ -1179,7 +1232,7 @@ class ThermalAnalyzerNG(QMainWindow):
     def update_single_roi(self, roi_model):
         """Aggiorna le statistiche di un singolo ROI."""
         import numpy as np
-        from analysis.roi_models import SpotROI
+        from analysis.roi_models import SpotROI, PolygonROI
         
         if self.thermal_data is None:
             roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None

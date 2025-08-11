@@ -1,7 +1,8 @@
 from typing import Optional
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QStyleOptionGraphicsItem, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QStyleOptionGraphicsItem, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem, QGraphicsPolygonItem
 from PySide6.QtCore import Qt, QPointF, Signal, QRectF
-from PySide6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QTransform, QPen, QBrush, QColor
+from PySide6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QTransform, QPen, QBrush, QColor, QPolygonF
+import uuid
 
 
 class BlendablePixmapItem(QGraphicsPixmapItem):
@@ -99,6 +100,14 @@ class ImageGraphicsView(QGraphicsView):
         
         # Flag per abilitare/disabilitare il disegno ROI
         self._allow_roi_drawing = True
+
+        # State for polygon drawing
+        self._polygon_drawing = False
+        self._current_polygon_points = []
+        self._temp_polygon_item = None
+        
+        # Assicura che la vista possa ricevere eventi della tastiera
+        self.setFocusPolicy(Qt.StrongFocus)
 
     def set_allow_roi_drawing(self, allowed: bool):
         self._allow_roi_drawing = allowed
@@ -392,13 +401,28 @@ class ImageGraphicsView(QGraphicsView):
             self._create_spot_from_click(event)
             return
         
+        # Check if we're in polygon ROI mode
+        if (self._main_window and 
+            hasattr(self._main_window, 'current_drawing_tool') and 
+            self._main_window.current_drawing_tool == "polygon" and 
+            self._allow_roi_drawing):
+            
+            if event.button() == Qt.LeftButton:
+                # Add point to polygon
+                self._add_polygon_point(event)
+                return
+            elif event.button() == Qt.RightButton and self._polygon_drawing:
+                # Finish polygon with right click
+                self._finish_polygon_drawing()
+                return
+        
         # Handle middle button for panning
         if event.button() == Qt.MiddleButton:
             self.setDragMode(QGraphicsView.ScrollHandDrag)
             self._pan_active = True
         
         super().mousePressEvent(event)
-    
+
     def mouseMoveEvent(self, event: QMouseEvent):
         """Gestione movimento del mouse per tooltip temperatura, sincronizzazione pan e ROI drawing."""
         
@@ -586,6 +610,114 @@ class ImageGraphicsView(QGraphicsView):
         
         print(f"Created Spot ROI: {spot_model}")
 
+    def _add_polygon_point(self, event: QMouseEvent):
+        """Aggiungi un punto al poligono in costruzione."""
+        # Converti la posizione del click in coordinate della scena
+        scene_pos = self.mapToScene(event.pos())
+        
+        # Mappa dalla scena alle coordinate dell'immagine termica
+        thermal_pos = self._thermal_item.mapFromScene(scene_pos)
+        
+        # Aggiungi il punto alla lista
+        self._current_polygon_points.append((thermal_pos.x(), thermal_pos.y()))
+        
+        # Se è il primo punto, inizia il disegno
+        if not self._polygon_drawing:
+            self._polygon_drawing = True
+            self._temp_polygon_item = QGraphicsPolygonItem()
+            self._temp_polygon_item.setPen(QPen(QColor(255, 165, 0, 150), 2, Qt.DashLine))
+            self._temp_polygon_item.setBrush(QBrush(QColor(255, 165, 0, 30)))
+            # Imposta il parent item invece di setParent()
+            self._temp_polygon_item.setParentItem(self._thermal_item)
+            
+            # Mostra istruzioni all'utente
+            print("🔵 Poligono iniziato! Click sinistro per aggiungere punti, INVIO/DOPPIO-CLICK per completare, ESC per annullare")
+        
+        # Aggiorna il poligono temporaneo
+        self._update_temp_polygon()
+        
+        print(f"Added polygon point: {thermal_pos.x():.1f}, {thermal_pos.y():.1f} (total: {len(self._current_polygon_points)})")
+
+    def _update_temp_polygon(self):
+        """Aggiorna il poligono temporaneo durante il disegno."""
+        if self._temp_polygon_item and len(self._current_polygon_points) >= 2:
+            
+            qt_polygon = QPolygonF()
+            for x, y in self._current_polygon_points:
+                qt_polygon.append(QPointF(x, y))
+            
+            self._temp_polygon_item.setPolygon(qt_polygon)
+
+    def _finish_polygon_drawing(self):
+        """Completa il disegno del poligono."""
+        if len(self._current_polygon_points) < 3:
+            print("⚠️  Poligono deve avere almeno 3 punti")
+            return
+        
+        print("✅ Poligono completato!")
+        
+        # Crea il poligono ROI definitivo
+        self._create_polygon_from_points(self._current_polygon_points)
+        
+        # Reset stato e pulisci il poligono temporaneo
+        self._cancel_polygon_drawing()
+        
+        # Disattiva la modalità di disegno poligoni
+        if self._main_window and hasattr(self._main_window, 'deactivate_drawing_tools'):
+            self._main_window.deactivate_drawing_tools()
+
+    def _cancel_polygon_drawing(self):
+        """Annulla il disegno del poligono e pulisce lo stato."""
+        # Rimuovi il poligono temporaneo
+        if self._temp_polygon_item:
+            # Se ha un parent, il parent lo rimuoverà automaticamente dalla scena
+            if self._temp_polygon_item.parentItem():
+                self._temp_polygon_item.setParentItem(None)
+            self._temp_polygon_item = None
+        
+        # Reset stato
+        self._polygon_drawing = False
+        self._current_polygon_points = []
+
+    def _create_polygon_from_points(self, points):
+        """Crea un poligono ROI dai punti disegnati."""
+        if not self._main_window:
+            return
+            
+        # Import here to avoid circular imports
+        from analysis.roi_models import PolygonROI
+        from ui.roi_items import PolygonROIItem
+        
+        # Chiudi il poligono se necessario
+        if points[0] != points[-1]:
+            points.append(points[0])
+        
+        # Crea il modello poligono ROI
+        polygon_model = PolygonROI(
+            points=points,
+            name=f"Polygon_{len(self._main_window.rois)+1}"
+        )
+        polygon_model.emissivity = 0.95
+        
+        # Crea l'item grafico come figlio dell'item termico
+        polygon_item = PolygonROIItem(polygon_model, parent=self._thermal_item)
+        polygon_item.setZValue(10)
+        
+        # Registra nelle collezioni
+        self._main_window.rois.append(polygon_model)
+        self._main_window.roi_items[polygon_model.id] = polygon_item
+        
+        # Aggiorna analisi/tabella
+        self._main_window.update_roi_analysis()
+        
+        # Colore per-ROI (ciclo sulla ruota HSV)
+        hue = (len(self._main_window.rois) * 55) % 360
+        color = QColor.fromHsv(hue, 220, 255)
+        polygon_model.color = color
+        polygon_item.set_color(color)
+        
+        print(f"Created Polygon ROI: {polygon_model}")
+
     def get_zoom_factor(self) -> float:
         """Ritorna il fattore di zoom corrente."""
         return self._zoom_factor
@@ -648,11 +780,27 @@ class ImageGraphicsView(QGraphicsView):
 
     def keyPressEvent(self, event):
         """Gestione pressione tasti."""
+        # INVIO completa il poligono
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if (self._main_window and 
+                hasattr(self._main_window, 'current_drawing_tool') and 
+                self._main_window.current_drawing_tool == "polygon" and 
+                self._polygon_drawing):
+                
+                self._finish_polygon_drawing()
+                event.accept()
+                return
+        
         # ESC ferma la modalità di disegno ROI
         if event.key() == Qt.Key_Escape:
             if (self._main_window and 
                 hasattr(self._main_window, 'current_drawing_tool') and 
                 self._main_window.current_drawing_tool is not None):
+                
+                # Se stavamo disegnando un poligono, pulisci
+                if self._polygon_drawing:
+                    print("❌ Disegno poligono annullato")
+                    self._cancel_polygon_drawing()
                 
                 self._main_window.deactivate_drawing_tools()
                 event.accept()
