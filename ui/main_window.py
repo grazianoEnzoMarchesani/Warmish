@@ -439,8 +439,8 @@ class ThermalAnalyzerNG(QMainWindow):
             
             print("Resettando stato dell'applicazione...")
             
-            # 1. Pulisci tutti i ROI esistenti
-            self.clear_all_rois()
+            # 1. Pulisci tutti i ROI esistenti SENZA chiedere conferma
+            self.clear_all_rois(confirm=False)
             
             # 2. Reset palette ai valori di default
             self.palette_combo.setCurrentText("Iron")
@@ -1440,18 +1440,26 @@ class ThermalAnalyzerNG(QMainWindow):
         self.update_roi_analysis()
         self.save_settings_to_json()
 
-    def clear_all_rois(self):
-        """Rimuove tutti i ROI."""
+    def clear_all_rois(self, confirm=True):
+        """Rimuove tutti i ROI.
+        
+        Args:
+            confirm (bool): Se True, mostra il dialogo di conferma. Se False, cancella direttamente.
+        """
         if not self.rois:
             return
-            
-        # Confirm deletion
-        reply = QMessageBox.question(self, "Clear All ROIs", 
-                                   "Are you sure you want to delete all ROIs?",
-                                   QMessageBox.Yes | QMessageBox.No,
-                                   QMessageBox.No)
         
-        if reply == QMessageBox.Yes:
+        should_clear = True
+        
+        # Mostra il dialogo di conferma solo se richiesto
+        if confirm:
+            reply = QMessageBox.question(self, "Clear All ROIs", 
+                                       "Are you sure you want to delete all ROIs?",
+                                       QMessageBox.Yes | QMessageBox.No,
+                                       QMessageBox.No)
+            should_clear = (reply == QMessageBox.Yes)
+        
+        if should_clear:
             # Remove all items from scene
             for roi_item in self.roi_items.values():
                 self.image_view._scene.removeItem(roi_item)
@@ -1464,7 +1472,9 @@ class ThermalAnalyzerNG(QMainWindow):
             self.update_roi_analysis()
             
             print("Cleared all ROIs")
-        if hasattr(self, 'current_image_path') and self.current_image_path and not getattr(self, '_ignore_auto_save', False):
+        
+        # Salva solo se non siamo in fase di reset e la cancellazione è avvenuta
+        if should_clear and hasattr(self, 'current_image_path') and self.current_image_path and not getattr(self, '_ignore_auto_save', False):
             self.save_settings_to_json()
 
     def activate_spot_tool(self):
