@@ -1702,7 +1702,9 @@ class ThermalAnalyzerNG(QMainWindow):
                 palette_index = self.palette_combo.findText(palette_name)
                 if palette_index >= 0:
                     self.palette_combo.setCurrentIndex(palette_index)
+                    self.selected_palette = palette_name  # Aggiorna anche la variabile interna
             
+            # Carica l'inversione della palette
             if "palette_inverted" in settings_data:
                 self.palette_inverted = settings_data["palette_inverted"]
             
@@ -1712,25 +1714,36 @@ class ThermalAnalyzerNG(QMainWindow):
                 
                 if "scale" in overlay and hasattr(self, 'scale_spin'):
                     self.scale_spin.setValue(overlay["scale"])
+                    self.overlay_scale = overlay["scale"]  # Aggiorna anche la variabile interna
                 if "offset_x" in overlay and hasattr(self, 'offsetx_spin'):
                     self.offsetx_spin.setValue(overlay["offset_x"])
+                    self.overlay_offset_x = overlay["offset_x"]  # Aggiorna anche la variabile interna
                 if "offset_y" in overlay and hasattr(self, 'offsety_spin'):
                     self.offsety_spin.setValue(overlay["offset_y"])
+                    self.overlay_offset_y = overlay["offset_y"]  # Aggiorna anche la variabile interna
                 if "opacity" in overlay and hasattr(self, 'overlay_alpha_slider'):
                     self.overlay_alpha_slider.setValue(overlay["opacity"])
+                    self.overlay_alpha = overlay["opacity"] / 100.0  # Aggiorna anche la variabile interna
                 if "blend_mode" in overlay and hasattr(self, 'blend_combo'):
                     blend_index = self.blend_combo.findText(overlay["blend_mode"])
                     if blend_index >= 0:
                         self.blend_combo.setCurrentIndex(blend_index)
+                        self.overlay_blend_mode = overlay["blend_mode"]  # Aggiorna anche la variabile interna
             
             # Carica i ROI
             if "rois" in settings_data:
                 self.load_rois_from_data(settings_data["rois"])
             
+            # AGGIUNTA IMPORTANTE: Applica visivamente le modifiche a palette e inversione
+            if self.temperature_data is not None:
+                self.update_view_only()  # Aggiorna la visualizzazione con le nuove impostazioni
+            
             print(f"Impostazioni caricate con successo da: {json_path}")
             
         except Exception as e:
             print(f"Errore nel caricamento delle impostazioni: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             self._ignore_auto_save = False
     
@@ -1829,8 +1842,6 @@ class ThermalAnalyzerNG(QMainWindow):
         if hasattr(self, 'blend_combo'):
             self.blend_combo.currentTextChanged.connect(self.save_settings_to_json)
         
-        # Inversione palette
-        if hasattr(self, 'action_invert_palette'):
-            self.action_invert_palette.triggered.connect(self.save_settings_to_json)
+        # L'inversione palette è già connessa nel metodo on_invert_palette()
         
         print("Segnali di auto-salvataggio connessi")
