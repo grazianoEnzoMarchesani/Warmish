@@ -567,7 +567,7 @@ class ThermalAnalyzerNG(QMainWindow):
             refl_temp_K = refl_temp_C + 273.15
             
             raw_refl = R1 / (R2 * (np.exp(B / refl_temp_K) - F)) - O
-            raw_obj = (self.thermal_data - (1 - emissivity) * raw_refl) / emissivity
+            raw_obj = (self.thermal_data - (1 - emissivity) * raw_refl) / max(emissivity, 1e-6)
             
             log_arg = R1 / (R2 * (raw_obj + O)) + F
             temp_K = np.full(log_arg.shape, np.nan, dtype=np.float64)
