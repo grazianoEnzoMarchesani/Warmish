@@ -109,11 +109,84 @@ class SpotROI:
         self.y = y
         self.radius = radius
         self.name = name if name else f"Spot_{str(self.id)[:8]}"
+        
+        # Statistics will be calculated when analyzing temperature data
         self.temp_min: Optional[float] = None
         self.temp_max: Optional[float] = None
         self.temp_mean: Optional[float] = None
         self.temp_std: Optional[float] = None
         self.temp_median: Optional[float] = None
+
+    def get_bounds(self):
+        """
+        Get the bounding coordinates of the circular ROI.
+        
+        Returns:
+            tuple: (x1, y1, x2, y2) where (x1,y1) is top-left and (x2,y2) is bottom-right of bounding box
+        """
+        return (self.x - self.radius, self.y - self.radius, 
+                self.x + self.radius, self.y + self.radius)
+    
+    def contains_point(self, x: float, y: float) -> bool:
+        """
+        Check if a point is inside this circular ROI.
+        
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            
+        Returns:
+            bool: True if point is inside the circular ROI
+        """
+        import math
+        distance = math.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
+        return distance <= self.radius
+    
+    def calculate_statistics(self, temperature_data):
+        """
+        Calculate temperature statistics for this circular ROI area.
+        
+        Args:
+            temperature_data: 2D numpy array of temperature values
+        """
+        import numpy as np
+        
+        # Get the bounds of the circle
+        x1, y1, x2, y2 = self.get_bounds()
+        
+        # Get integer bounds for array indexing
+        x1, y1 = int(x1), int(y1)
+        x2, y2 = int(x2), int(y2)
+        
+        # Ensure bounds are within array limits
+        height, width = temperature_data.shape
+        x1, x2 = max(0, x1), min(width, x2)
+        y1, y2 = max(0, y1), min(height, y2)
+        
+        if x1 >= x2 or y1 >= y2:
+            # Invalid bounds
+            self.temp_min = self.temp_max = self.temp_mean = self.temp_std = self.temp_median = None
+            return
+        
+        # Create a mask for the circular area
+        y_indices, x_indices = np.ogrid[y1:y2, x1:x2]
+        mask = ((x_indices - self.x) ** 2 + (y_indices - self.y) ** 2) <= (self.radius ** 2)
+        
+        # Extract temperatures within the circular ROI
+        roi_temps = temperature_data[y1:y2, x1:x2]
+        circular_temps = roi_temps[mask]
+        
+        # Remove NaN values
+        valid_temps = circular_temps[~np.isnan(circular_temps)]
+        
+        if len(valid_temps) == 0:
+            self.temp_min = self.temp_max = self.temp_mean = self.temp_std = self.temp_median = None
+        else:
+            self.temp_min = float(np.min(valid_temps))
+            self.temp_max = float(np.max(valid_temps))
+            self.temp_mean = float(np.mean(valid_temps))
+            self.temp_std = float(np.std(valid_temps))
+            self.temp_median = float(np.median(valid_temps))
 
     def __str__(self):
         return f"SpotROI(name='{self.name}', x={self.x}, y={self.y}, r={self.radius})"

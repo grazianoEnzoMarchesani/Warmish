@@ -237,8 +237,14 @@ class ThermalAnalyzerNG(QMainWindow):
         self.btn_rect = QPushButton("Rettangolo")
         self.btn_poly = QPushButton("Poligono")
         
+        # Rendi i pulsanti checkable per feedback visivo
+        self.btn_spot.setCheckable(True)
+        self.btn_rect.setCheckable(True)
+        self.btn_poly.setCheckable(True)
+        
         # Connect ROI drawing buttons
         self.btn_rect.clicked.connect(self.activate_rect_tool)
+        self.btn_spot.clicked.connect(self.activate_spot_tool)
         
         _areas_tools.addWidget(self.btn_spot)
         _areas_tools.addWidget(self.btn_rect)
@@ -1067,42 +1073,91 @@ class ThermalAnalyzerNG(QMainWindow):
             
             print("Cleared all ROIs")
 
+    def activate_spot_tool(self):
+        """Attiva lo strumento per creare spot ROI."""
+        self.current_drawing_tool = "spot"
+        if hasattr(self, "image_view"):
+            self.image_view.setCursor(Qt.CrossCursor)
+        
+        # Reset altri pulsanti e attiva questo
+        self.btn_rect.setChecked(False)
+        self.btn_poly.setChecked(False)
+        self.btn_spot.setChecked(True)
+
     def activate_rect_tool(self):
+        """Attiva lo strumento per creare ROI rettangolari."""
         self.current_drawing_tool = "rect"
         if hasattr(self, "image_view"):
             self.image_view.setCursor(Qt.CrossCursor)
+        
+        # Reset altri pulsanti e attiva questo
+        self.btn_spot.setChecked(False)
+        self.btn_poly.setChecked(False)
+        self.btn_rect.setChecked(True)
 
     def deactivate_drawing_tools(self):
+        """Disattiva tutti gli strumenti di disegno."""
         self.current_drawing_tool = None
         if hasattr(self, "image_view"):
             self.image_view.setCursor(Qt.ArrowCursor)
+        
+        # Feedback visivo: resetta i pulsanti (opzionale)
+        if hasattr(self, "btn_spot"):
+            self.btn_spot.setChecked(False)
+        if hasattr(self, "btn_rect"):
+            self.btn_rect.setChecked(False)
 
     def compute_roi_temperatures(self, roi):
         import numpy as np
         from PySide6.QtCore import QRectF, QPointF
+        from analysis.roi_models import SpotROI
 
         if self.thermal_data is None or not hasattr(self, "image_view"):
             return None
 
-        # Rettangolo in coordinate dell'item termico
-        item = self.roi_items.get(roi.id)
-        if item is not None and item.parentItem() is self.image_view._thermal_item:
-            rect = item.mapRectToParent(item.rect()).normalized()
+        # Gestisci diversi tipi di ROI
+        if isinstance(roi, SpotROI):
+            # Per spot ROI, crea una maschera circolare
+            h, w = self.thermal_data.shape
+            
+            # Bounds del cerchio
+            x1, y1, x2, y2 = roi.get_bounds()
+            x1, y1 = max(0, int(x1)), max(0, int(y1))
+            x2, y2 = min(w, int(x2)), min(h, int(y2))
+            
+            if x1 >= x2 or y1 >= y2:
+                return None
+            
+            # Crea maschera circolare
+            y_indices, x_indices = np.ogrid[y1:y2, x1:x2]
+            mask = ((x_indices - roi.x) ** 2 + (y_indices - roi.y) ** 2) <= (roi.radius ** 2)
+            
+            # Estrai solo i pixel del cerchio
+            thermal_roi = self.thermal_data[y1:y2, x1:x2].astype(np.float64)
+            thermal_roi = thermal_roi[mask]
+            
+            if thermal_roi.size == 0:
+                return None
         else:
-            # Fallback: tratta il modello come coordinate termiche (non scena)
-            rect = QRectF(float(roi.x), float(roi.y), float(roi.width), float(roi.height)).normalized()
+            # Per ROI rettangolari (logica esistente)
+            item = self.roi_items.get(roi.id)
+            if item is not None and item.parentItem() is self.image_view._thermal_item:
+                rect = item.mapRectToParent(item.rect()).normalized()
+            else:
+                # Fallback: tratta il modello come coordinate termiche (non scena)
+                rect = QRectF(float(roi.x), float(roi.y), float(roi.width), float(roi.height)).normalized()
 
-        h, w = self.thermal_data.shape
-        x1 = max(0, int(np.floor(rect.left())))
-        y1 = max(0, int(np.floor(rect.top())))
-        x2 = min(w, int(np.ceil(rect.right())))
-        y2 = min(h, int(np.ceil(rect.bottom())))
-        if x1 >= x2 or y1 >= y2:
-            return None
+            h, w = self.thermal_data.shape
+            x1 = max(0, int(np.floor(rect.left())))
+            y1 = max(0, int(np.floor(rect.top())))
+            x2 = min(w, int(np.ceil(rect.right())))
+            y2 = min(h, int(np.ceil(rect.bottom())))
+            if x1 >= x2 or y1 >= y2:
+                return None
 
-        thermal_roi = self.thermal_data[y1:y2, x1:x2].astype(np.float64)
+            thermal_roi = self.thermal_data[y1:y2, x1:x2].astype(np.float64)
 
-        # Parametri + emissività per-ROI
+        # Applica la conversione di Planck (uguale per tutti i tipi di ROI)
         emissivity = float(getattr(roi, 'emissivity', 0.95))
         refl_temp_C = float(self.param_inputs["ReflectedApparentTemperature"].text())
         R1 = float(self.param_inputs["PlanckR1"].text())
@@ -1122,21 +1177,36 @@ class ThermalAnalyzerNG(QMainWindow):
         return temp_K - 273.15
 
     def update_single_roi(self, roi_model):
+        """Aggiorna le statistiche di un singolo ROI."""
         import numpy as np
-        temps = self.compute_roi_temperatures(roi_model)
-        if temps is not None:
-            valid = temps[~np.isnan(temps)]
-            if valid.size > 0:
-                roi_model.temp_min = float(np.min(valid))
-                roi_model.temp_max = float(np.max(valid))
-                roi_model.temp_mean = float(np.mean(valid))
-                roi_model.temp_std  = float(np.std(valid))
-                roi_model.temp_median = float(np.median(valid))       # <-- aggiunto
-            else:
-                roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = roi_model.temp_median = None
+        from analysis.roi_models import SpotROI
+        
+        if self.thermal_data is None:
+            roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
+            if hasattr(roi_model, 'temp_median'):
+                roi_model.temp_median = None
         else:
-            roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = roi_model.temp_median = None
+            # Per tutti i tipi di ROI, usa compute_roi_temperatures che fa la conversione di Planck
+            temps = self.compute_roi_temperatures(roi_model)
+            if temps is not None:
+                valid = temps[~np.isnan(temps)]
+                if valid.size > 0:
+                    roi_model.temp_min = float(np.min(valid))
+                    roi_model.temp_max = float(np.max(valid))
+                    roi_model.temp_mean = float(np.mean(valid))
+                    roi_model.temp_std = float(np.std(valid))
+                    if hasattr(roi_model, 'temp_median'):
+                        roi_model.temp_median = float(np.median(valid))
+                else:
+                    roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
+                    if hasattr(roi_model, 'temp_median'):
+                        roi_model.temp_median = None
+            else:
+                roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
+                if hasattr(roi_model, 'temp_median'):
+                    roi_model.temp_median = None
 
+        # Aggiorna l'etichetta e la tabella
         item = self.roi_items.get(roi_model.id)
         if item and hasattr(item, "refresh_label"):
             item.refresh_label()

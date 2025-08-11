@@ -381,6 +381,17 @@ class ImageGraphicsView(QGraphicsView):
             self._start_roi_drawing(event)
             return  # Don't call super() to prevent other mouse handling
         
+        # Check if we're in spot ROI mode
+        if (self._main_window and 
+            hasattr(self._main_window, 'current_drawing_tool') and 
+            self._main_window.current_drawing_tool == "spot" and 
+            self._allow_roi_drawing and
+            event.button() == Qt.LeftButton):
+            
+            # Create spot ROI directly
+            self._create_spot_from_click(event)
+            return
+        
         # Handle middle button for panning
         if event.button() == Qt.MiddleButton:
             self.setDragMode(QGraphicsView.ScrollHandDrag)
@@ -532,6 +543,49 @@ class ImageGraphicsView(QGraphicsView):
         
         print(f"Created ROI: {roi_model}")
 
+    def _create_spot_from_click(self, event: QMouseEvent):
+        """Crea uno spot ROI dal click del mouse."""
+        if not self._main_window:
+            return
+            
+        # Import here to avoid circular imports
+        from analysis.roi_models import SpotROI
+        from ui.roi_items import SpotROIItem
+        
+        # Converti la posizione del click in coordinate della scena
+        scene_pos = self.mapToScene(event.pos())
+        
+        # Mappa dalla scena alle coordinate dell'immagine termica
+        thermal_pos = self._thermal_item.mapFromScene(scene_pos)
+        
+        # Crea il modello spot ROI con raggio di default
+        spot_model = SpotROI(
+            x=thermal_pos.x(), 
+            y=thermal_pos.y(), 
+            radius=10.0,  # Raggio di default in pixel termici
+            name=f"Spot_{len(self._main_window.rois)+1}"
+        )
+        spot_model.emissivity = 0.95
+        
+        # Crea l'item grafico come figlio dell'item termico
+        spot_item = SpotROIItem(spot_model, parent=self._thermal_item)
+        spot_item.setZValue(10)
+        
+        # Registra nelle collezioni
+        self._main_window.rois.append(spot_model)
+        self._main_window.roi_items[spot_model.id] = spot_item
+        
+        # Aggiorna analisi/tabella
+        self._main_window.update_roi_analysis()
+        
+        # Colore per-ROI (ciclo sulla ruota HSV)
+        hue = (len(self._main_window.rois) * 55) % 360
+        color = QColor.fromHsv(hue, 220, 255)
+        spot_model.color = color
+        spot_item.set_color(color)
+        
+        print(f"Created Spot ROI: {spot_model}")
+
     def get_zoom_factor(self) -> float:
         """Ritorna il fattore di zoom corrente."""
         return self._zoom_factor
@@ -591,4 +645,18 @@ class ImageGraphicsView(QGraphicsView):
         """Ritorna l'offset corrente del pan."""
         transform = self.transform()
         return QPointF(transform.dx(), transform.dy())
+
+    def keyPressEvent(self, event):
+        """Gestione pressione tasti."""
+        # ESC ferma la modalità di disegno ROI
+        if event.key() == Qt.Key_Escape:
+            if (self._main_window and 
+                hasattr(self._main_window, 'current_drawing_tool') and 
+                self._main_window.current_drawing_tool is not None):
+                
+                self._main_window.deactivate_drawing_tools()
+                event.accept()
+                return
+        
+        super().keyPressEvent(event)
         

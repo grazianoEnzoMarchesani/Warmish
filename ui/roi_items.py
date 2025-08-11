@@ -5,10 +5,10 @@ This module contains QGraphicsItem-based classes for visually representing
 ROIs (Regions of Interest) in a QGraphicsScene.
 """
 
-from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem, QGraphicsTextItem, QCheckBox, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem, QGraphicsTextItem, QCheckBox, QHBoxLayout, QLabel, QGraphicsEllipseItem
 from PySide6.QtGui import QPen, QBrush, QColor, QCursor
 from PySide6.QtCore import Qt, QRectF, QPointF
-from analysis.roi_models import RectROI
+from analysis.roi_models import RectROI, SpotROI
 
 
 class RectROIItem(QGraphicsRectItem):
@@ -294,3 +294,276 @@ class RectROIItem(QGraphicsRectItem):
     def _update_label_pos(self):
         # angolo alto-sinistra del rettangolo con piccolo offset
         self.label.setPos(self.rect().left() + 2, self.rect().top() - self.label.boundingRect().height() - 2)
+
+
+class SpotROIItem(QGraphicsEllipseItem):
+    """
+    Graphical representation of a spot (circular) ROI for use in QGraphicsScene.
+    
+    This class provides visual representation and interactive capabilities
+    for SpotROI model objects within a QGraphicsView/QGraphicsScene framework.
+    """
+    
+    def __init__(self, model: SpotROI, parent=None):
+        """
+        Initialize the graphical spot ROI item.
+        
+        Args:
+            model: SpotROI instance containing the ROI data and coordinates
+            parent: Optional parent QGraphicsItem
+        """
+        # Initialize the parent QGraphicsEllipseItem with the geometry from the model
+        diameter = model.radius * 2
+        rect = QRectF(-model.radius, -model.radius, diameter, diameter)
+        super().__init__(rect, parent)
+        
+        # Store reference to the model
+        self.model = model
+        
+        # Set interaction flags
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        
+        # Set visual appearance
+        self._setup_appearance()
+        self.setZValue(10)  # ROI sempre sopra le immagini
+        self.setAcceptHoverEvents(True)
+        self._resizing = False
+        self._handle_size = 8  # px
+        self.setPos(model.x, model.y)
+        self._press_parent_pos = QPointF()
+        
+        # Colore iniziale (dal modello se presente)
+        self._color = getattr(self.model, "color", QColor(255, 165, 0))
+        self._apply_color(self._color)
+        
+        # Label: nome + statistiche; non scala con lo zoom
+        self.label = QGraphicsTextItem("", self)
+        self.label.setDefaultTextColor(Qt.white)
+        self.label.setZValue(self.zValue() + 1)
+        self.label.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self.refresh_label()
+        self._update_label_pos()
+    
+    def _setup_appearance(self):
+        """Set up the visual appearance of the spot ROI item."""
+        # Create orange pen for the border (2px thickness)
+        pen = QPen(QColor(255, 165, 0), 2)  # Orange color
+        pen.setStyle(Qt.SolidLine)
+        self.setPen(pen)
+        
+        # Create semi-transparent orange brush for fill
+        brush_color = QColor(255, 165, 0, 40)  # Orange with ~15% opacity (40/255)
+        brush = QBrush(brush_color)
+        self.setBrush(brush)
+    
+    def itemChange(self, change, value):
+        """
+        Handle item changes, specifically position changes to sync with model.
+        
+        Args:
+            change: Type of change (QGraphicsItem.GraphicsItemChange)
+            value: New value associated with the change
+            
+        Returns:
+            The processed value (usually unchanged)
+        """
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            # Update the model coordinates when the item is moved
+            new_position = value
+            self.model.x = float(new_position.x())
+            self.model.y = float(new_position.y())
+        
+        # Call parent implementation
+        return super().itemChange(change, value)
+    
+    def update_from_model(self):
+        """
+        Update the graphical representation from the model data.
+        
+        This method can be called to refresh the item when the model
+        has been modified externally.
+        """
+        # Update the circle geometry
+        diameter = self.model.radius * 2
+        self.setRect(QRectF(-self.model.radius, -self.model.radius, diameter, diameter))
+        self.setPos(self.model.x, self.model.y)
+        self._update_label_pos()
+    
+    def get_model_id(self):
+        """
+        Get the unique ID of the associated model.
+        
+        Returns:
+            UUID: The unique identifier of the ROI model
+        """
+        return self.model.id
+    
+    def get_model_name(self):
+        """
+        Get the name of the associated model.
+        
+        Returns:
+            str: The name of the ROI model
+        """
+        return self.model.name
+
+    def _get_resize_handles(self):
+        """Get the positions of resize handles for the circle."""
+        r = self.model.radius
+        return {
+            "right": QPointF(r, 0),
+            "bottom": QPointF(0, r),
+            "left": QPointF(-r, 0),
+            "top": QPointF(0, -r),
+        }
+
+    def _handle_at(self, pos: QPointF):
+        """Check if position is near a resize handle."""
+        s2 = self._handle_size / 2.0
+        for key, handle_pos in self._get_resize_handles().items():
+            if QRectF(handle_pos.x()-s2, handle_pos.y()-s2, self._handle_size, self._handle_size).contains(pos):
+                return key
+        return None
+
+    def hoverMoveEvent(self, event):
+        """Handle hover events to show appropriate cursor for resize handles."""
+        h = self._handle_at(event.pos())
+        cursors = {
+            "right": Qt.SizeHorCursor,
+            "left": Qt.SizeHorCursor,
+            "top": Qt.SizeVerCursor,
+            "bottom": Qt.SizeVerCursor,
+            None: Qt.ArrowCursor,
+        }
+        self.setCursor(QCursor(cursors[h]))
+        super().hoverMoveEvent(event)
+
+    def mousePressEvent(self, event):
+        """Handle mouse press events for resize and move operations."""
+        if event.button() == Qt.LeftButton:
+            h = self._handle_at(event.pos())
+            if h:  # start resize
+                self._resizing = True
+                self._resize_handle = h
+                self._orig_radius = self.model.radius
+                self._press_parent_pos = self.mapToParent(event.pos())
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move events for resizing the circle."""
+        if self._resizing and self._resize_handle:
+            cur_parent = self.mapToParent(event.pos())
+            dx = cur_parent.x() - self._press_parent_pos.x()
+            dy = cur_parent.y() - self._press_parent_pos.y()
+
+            min_radius = 2.0
+            new_radius = self._orig_radius
+
+            # Calculate new radius based on handle direction and movement
+            if self._resize_handle == "right":
+                # Trascinando verso destra aumenta, verso sinistra diminuisce
+                new_radius = max(min_radius, self._orig_radius + dx)
+            elif self._resize_handle == "left":
+                # Trascinando verso sinistra aumenta, verso destra diminuisce
+                new_radius = max(min_radius, self._orig_radius - dx)
+            elif self._resize_handle == "bottom":
+                # Trascinando verso il basso aumenta, verso l'alto diminuisce
+                new_radius = max(min_radius, self._orig_radius + dy)
+            elif self._resize_handle == "top":
+                # Trascinando verso l'alto aumenta, verso il basso diminuisce
+                new_radius = max(min_radius, self._orig_radius - dy)
+
+            # Update the circle
+            diameter = new_radius * 2
+            self.setRect(QRectF(-new_radius, -new_radius, diameter, diameter))
+            self._update_label_pos()
+
+            # Sync model
+            self.model.radius = float(new_radius)
+            event.accept()
+            return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release events."""
+        if self._resizing and event.button() == Qt.LeftButton:
+            self._resizing = False
+            self._resize_handle = None
+            # Notify model changed
+            self._notify_model_changed()
+            event.accept()
+            return
+        # se era un semplice move, ricalcola qui
+        if event.button() == Qt.LeftButton:
+            self._notify_model_changed()
+        super().mouseReleaseEvent(event)
+
+    def _notify_model_changed(self):
+        """Notify that the model has changed and needs recalculation."""
+        # Update model position
+        self.model.x = float(self.pos().x())
+        self.model.y = float(self.pos().y())
+        
+        # Notify main window for recalculation
+        view_list = self.scene().views()
+        if view_list:
+            view = view_list[0]
+            if hasattr(view, "_main_window") and hasattr(view._main_window, "update_single_roi"):
+                view._main_window.update_single_roi(self.model)
+    
+    def _apply_color(self, color: QColor):
+        """Apply color to the spot ROI."""
+        pen = QPen(color, 2)
+        pen.setStyle(Qt.SolidLine)
+        self.setPen(pen)
+        fill = QColor(color)
+        fill.setAlpha(40)
+        self.setBrush(QBrush(fill))
+    
+    def set_color(self, color: QColor):
+        """Set the color of the spot ROI."""
+        self._color = color
+        setattr(self.model, "color", color)
+        self._apply_color(color)
+    
+    def refresh_label(self):
+        """Refresh the label text with current statistics."""
+        m = self.model
+        # Recupera le impostazioni dalla MainWindow
+        settings = {
+            "name": True, "emissivity": True, "min": True, "max": True, "avg": True, "median": False
+        }
+        views = self.scene().views()
+        if views:
+            mw = getattr(views[0], "_main_window", None)
+            if mw and hasattr(mw, "roi_label_settings"):
+                settings = mw.roi_label_settings
+
+        def fmt(v): return f"{v:.2f}" if (v is not None) else "N/A"
+        parts1 = []
+        if settings.get("name", True): parts1.append(m.name)
+        if settings.get("emissivity", True): parts1.append(f"ε {getattr(m, 'emissivity', 0.95):.3f}")
+        line1 = " | ".join(parts1)
+
+        parts2 = []
+        if settings.get("min", True): parts2.append(f"min {fmt(getattr(m, 'temp_min', None))}")
+        if settings.get("max", True): parts2.append(f"max {fmt(getattr(m, 'temp_max', None))}")
+        if settings.get("avg", True): parts2.append(f"avg {fmt(getattr(m, 'temp_mean', None))}")
+        if settings.get("median", False): parts2.append(f"med {fmt(getattr(m, 'temp_median', None))}")
+        line2 = " | ".join(parts2)
+
+        text = line1 if line2 == "" else f"{line1}\n{line2}"
+        self.label.setPlainText(text)
+        self._update_label_pos()
+    
+    def _update_label_pos(self):
+        """Update the label position relative to the circle."""
+        # Position label above the circle with small offset
+        label_x = -self.label.boundingRect().width() / 2
+        label_y = -self.model.radius - self.label.boundingRect().height() - 2
+        self.label.setPos(label_x, label_y)
