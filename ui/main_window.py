@@ -432,14 +432,102 @@ class ThermalAnalyzerNG(QMainWindow):
         self.current_image_path = None  # Percorso del file JPG correntemente aperto
         self._ignore_auto_save = False  # Flag per evitare salvataggi durante il caricamento
 
+    def reset_application_state(self):
+        """Resetta completamente lo stato dell'applicazione prima di caricare una nuova immagine."""
+        try:
+            self._ignore_auto_save = True  # Previeni salvataggi durante il reset
+            
+            print("Resettando stato dell'applicazione...")
+            
+            # 1. Pulisci tutti i ROI esistenti
+            self.clear_all_rois()
+            
+            # 2. Reset palette ai valori di default
+            self.palette_combo.setCurrentText("Iron")
+            self.selected_palette = "Iron"
+            self.palette_inverted = False
+            
+            # 3. Reset parametri termici ai valori di default (saranno poi sovrascritti dagli EXIF)
+            default_values = {
+                "Emissivity": "0.950000",
+                "ObjectDistance": "1.0000",
+                "ReflectedApparentTemperature": "20.0000",
+                "AtmosphericTemperature": "20.0000",
+                "AtmosphericTransmission": "0.950000",
+                "RelativeHumidity": "50.0000",
+                "PlanckR1": "",
+                "PlanckR2": "",
+                "PlanckB": "",
+                "PlanckF": "",
+                "PlanckO": ""
+            }
+            
+            for param, default_value in default_values.items():
+                if param in self.param_inputs:
+                    self.param_inputs[param].blockSignals(True)
+                    self.param_inputs[param].setText(default_value)
+                    self.param_inputs[param].setStyleSheet("")  # Rimuovi colorazioni speciali
+                    self.param_inputs[param].blockSignals(False)
+            
+            # 4. Reset impostazioni overlay ai valori di default
+            if hasattr(self, 'scale_spin'):
+                self.scale_spin.blockSignals(True)
+                self.scale_spin.setValue(1.0)
+                self.scale_spin.blockSignals(False)
+                self.overlay_scale = 1.0
+            
+            if hasattr(self, 'offsetx_spin'):
+                self.offsetx_spin.blockSignals(True)
+                self.offsetx_spin.setValue(0)
+                self.offsetx_spin.blockSignals(False)
+                self.overlay_offset_x = 0.0
+            
+            if hasattr(self, 'offsety_spin'):
+                self.offsety_spin.blockSignals(True)
+                self.offsety_spin.setValue(0)
+                self.offsety_spin.blockSignals(False)
+                self.overlay_offset_y = 0.0
+            
+            if hasattr(self, 'overlay_alpha_slider'):
+                self.overlay_alpha_slider.blockSignals(True)
+                self.overlay_alpha_slider.setValue(50)
+                self.overlay_alpha_slider.blockSignals(False)
+                self.overlay_alpha = 0.5
+            
+            if hasattr(self, 'blend_combo'):
+                self.blend_combo.blockSignals(True)
+                self.blend_combo.setCurrentText("Normal")
+                self.blend_combo.blockSignals(False)
+                self.overlay_blend_mode = "Normal"
+            
+            # 5. Disattiva modalità overlay
+            if hasattr(self, 'action_overlay_view'):
+                self.action_overlay_view.setChecked(False)
+                self.overlay_mode = False
+            
+            # 6. Reset valori meta overlay
+            self.meta_overlay_scale = 1.0
+            self.meta_offset_x = 0.0
+            self.meta_offset_y = 0.0
+            
+            print("Reset stato completato")
+            
+        except Exception as e:
+            print(f"Errore durante il reset dello stato: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._ignore_auto_save = False
+
     def open_image(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleziona Immagine FLIR", "", "Immagini JPEG (*.jpg *.jpeg)")
         if not file_path: return
 
-        # Aggiungo subito dopo la riga 432:
-        
         # Salva il percorso del file corrente
         self.current_image_path = file_path
+        
+        # AGGIUNTA IMPORTANTE: Reset completo dello stato dell'applicazione
+        self.reset_application_state()
 
         try:
             self.setWindowTitle(f"Warmish - {file_path.split('/')[-1]}")
@@ -447,6 +535,7 @@ class ThermalAnalyzerNG(QMainWindow):
                 json_string = et.execute(b"-json", file_path.encode())
                 self.metadata = json.loads(json_string)[0]
                 self.all_meta_display.setPlainText(json.dumps(self.metadata, indent=4, default=str))
+                
                 # Imposta scala overlay direttamente dai metadati, se disponibile
                 try:
                     self.meta_overlay_scale = 1/float(self.metadata.get("APP1:Real2IR", 1.0))
@@ -480,6 +569,7 @@ class ThermalAnalyzerNG(QMainWindow):
                     self.offsetx_spin.blockSignals(False)
                     self.offsety_spin.blockSignals(False)
             
+            # Popola i parametri dagli EXIF (questo sovrascriverà i valori di default del reset)
             self.populate_params()
 
             command = ["exiftool", "-b", "-RawThermalImage", file_path]
@@ -490,13 +580,7 @@ class ThermalAnalyzerNG(QMainWindow):
             image_type = self.metadata.get("APP1:RawThermalImageType", "Unknown")
             if image_type == "PNG":
                 self.thermal_data = np.array(Image.open(io.BytesIO(raw_thermal_bytes)))
-                
-                # LA CORREZIONE FONDAMENTALE: Invertiamo l'ordine dei byte!
-                # Le PNG di FLIR usano un ordine dei byte non standard (MSB).
-                # NumPy lo legge nell'ordine nativo della macchina (LSB).
-                # Dobbiamo invertirlo per ottenere i valori corretti.
                 self.thermal_data.byteswap(inplace=True)
-
             else:
                 width = self.metadata.get('APP1:RawThermalImageWidth')
                 height = self.metadata.get('APP1:RawThermalImageHeight')
@@ -505,16 +589,14 @@ class ThermalAnalyzerNG(QMainWindow):
 
             self.update_analysis()
             
-            # AGGIUNGO QUI IL CARICAMENTO AUTOMATICO:
-            # Carica le impostazioni dal JSON se esiste
+            # IMPORTANTE: Carica le impostazioni dal JSON DOPO aver fatto il reset e popolato gli EXIF
+            # Così se il JSON esiste sovrascrive il reset, altrimenti rimane lo stato pulito
             self.load_settings_from_json()
             
             # Connetti i segnali per l'auto-salvataggio (solo una volta)
             if not hasattr(self, '_auto_save_connected'):
                 self.connect_auto_save_signals()
                 self._auto_save_connected = True
-            
-            # QMessageBox.information(self, "Successo", "Immagine radiometrica caricata con successo!")
 
         except Exception as e:
             QMessageBox.critical(self, "Errore", f"Impossibile processare il file:\n{e}")
@@ -1382,7 +1464,7 @@ class ThermalAnalyzerNG(QMainWindow):
             self.update_roi_analysis()
             
             print("Cleared all ROIs")
-        if hasattr(self, 'current_image_path') and self.current_image_path:
+        if hasattr(self, 'current_image_path') and self.current_image_path and not getattr(self, '_ignore_auto_save', False):
             self.save_settings_to_json()
 
     def activate_spot_tool(self):
