@@ -1037,20 +1037,18 @@ class ThermalAnalyzerNG(QMainWindow):
 
     def compute_roi_temperatures(self, roi):
         import numpy as np
+        from PySide6.QtCore import QRectF, QPointF
+
         if self.thermal_data is None or not hasattr(self, "image_view"):
             return None
 
-        # Rettangolo del ROI nel sistema dell'item termico
-        rect = None
+        # Rettangolo in coordinate dell'item termico
         item = self.roi_items.get(roi.id)
-        if item is not None and item.parentItem() is not self.image_view._thermal_item:
-            # ROI non sulla termica primaria → non calcolabile
-            return None
+        if item is not None and item.parentItem() is self.image_view._thermal_item:
+            rect = item.mapRectToParent(item.rect()).normalized()
         else:
-            # fallback per ROI “legacy”: mappa modello scena->termico
-            tl_img = self.image_view._thermal_item.mapFromScene(QPointF(float(roi.x), float(roi.y)))
-            br_img = self.image_view._thermal_item.mapFromScene(QPointF(float(roi.x + roi.width), float(roi.y + roi.height)))
-            rect = QRectF(tl_img, br_img).normalized()
+            # Fallback: tratta il modello come coordinate termiche (non scena)
+            rect = QRectF(float(roi.x), float(roi.y), float(roi.width), float(roi.height)).normalized()
 
         h, w = self.thermal_data.shape
         x1 = max(0, int(np.floor(rect.left())))
@@ -1062,6 +1060,7 @@ class ThermalAnalyzerNG(QMainWindow):
 
         thermal_roi = self.thermal_data[y1:y2, x1:x2].astype(np.float64)
 
+        # Parametri + emissività per-ROI
         emissivity = float(getattr(roi, 'emissivity', 0.95))
         refl_temp_C = float(self.param_inputs["ReflectedApparentTemperature"].text())
         R1 = float(self.param_inputs["PlanckR1"].text())
