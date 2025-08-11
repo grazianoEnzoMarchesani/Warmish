@@ -1253,6 +1253,9 @@ class ThermalAnalyzerNG(QMainWindow):
                 item.refresh_label()
 
         print(f"ROI analysis completed. Total ROIs: {len(self.rois)}")
+        
+        # AGGIUNTA IMPORTANTE: Salva automaticamente quando vengono creati nuovi ROI
+        self.save_settings_to_json()
 
     def update_roi_table(self):
         """
@@ -1363,6 +1366,8 @@ class ThermalAnalyzerNG(QMainWindow):
             if new_name:
                 roi.name = new_name
                 print(f"Updated ROI name to: {new_name}")
+                # AGGIUNTA IMPORTANTE: Salva automaticamente quando cambia il nome
+                self.save_settings_to_json()
             else:
                 # Revert to previous name if empty
                 item.setText(roi.name)
@@ -1374,7 +1379,7 @@ class ThermalAnalyzerNG(QMainWindow):
                     roi.emissivity = new_emissivity
                     print(f"Updated ROI emissivity to: {new_emissivity}")
                     # Ricalcola statistiche con emissività per-ROI
-                    self.update_roi_analysis()
+                    self.update_roi_analysis()  # Questo già include il salvataggio
                 else:
                     # Invalid range, revert
                     emissivity_value = getattr(roi, 'emissivity', 0.95)
