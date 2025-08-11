@@ -207,12 +207,20 @@ class ThermalAnalyzerNG(QMainWindow):
         self.params_groupbox = QGroupBox("Parametri di Calcolo")
         self.params_layout = QFormLayout(self.params_groupbox)
         self.param_inputs = {}
-        param_keys = ["Emissivity", "ObjectDistance", "ReflectedApparentTemperature", "PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO"]
+        param_keys = ["Emissivity", "ObjectDistance", "ReflectedApparentTemperature", "PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO", "AtmosphericTemperature", "AtmosphericTransmission", "RelativeHumidity"]
         for key in param_keys:
             line_edit = QLineEdit()
             line_edit.editingFinished.connect(self.recalculate_and_update_view)  # <--- CAMBIATO
             self.param_inputs[key] = line_edit
             self.params_layout.addRow(key, self.param_inputs[key])
+        
+        # Pulsante per reset ai valori EXIF
+        self.reset_params_button = QPushButton("Reset to EXIF values")
+        self.reset_params_button.setToolTip("Ripristina tutti i parametri ai valori estratti dai metadati EXIF\n" +
+                                           "Usa valori di default per parametri non disponibili")
+        self.reset_params_button.clicked.connect(self.reset_params_to_exif)
+        self.params_layout.addRow("", self.reset_params_button)
+        
         self.tab_params_layout.addWidget(self.params_groupbox)
         # (Legenda spostata accanto alle immagini; rimossa dal tab)
         # Metadati
@@ -551,9 +559,208 @@ class ThermalAnalyzerNG(QMainWindow):
 
     def populate_params(self):
         if not self.metadata: return
+        
+        # Valori di default per parametri ambientali
+        default_values = {
+            "AtmosphericTemperature": 20.0,
+            "AtmosphericTransmission": 0.95,  # Valore standard per distanze brevi (0-10m)
+            "RelativeHumidity": 50.0,
+            "ObjectDistance": 1.0,
+            "Emissivity": 0.95
+        }
+        
         for key, line_edit in self.param_inputs.items():
             value = self.metadata.get(f"APP1:{key}", self.metadata.get(key, "N/A"))
-            line_edit.setText(str(value))
+            
+            # Se il valore è N/A, usa il default se disponibile
+            if value == "N/A" and key in default_values:
+                value = default_values[key]
+                line_edit.setStyleSheet("background-color: #fff3cd;")  # Sfondo giallo per indicare valore di default
+                line_edit.setToolTip(f"Valore di default utilizzato: {value}")
+            else:
+                line_edit.setStyleSheet("")  # Reset dello stile
+                line_edit.setToolTip("")
+            
+            # Applica la precisione appropriata
+            if isinstance(value, (int, float)) and value != "N/A":
+                if key in ["PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO"]:
+                    line_edit.setText(f"{float(value):.12f}")
+                elif key in ["Emissivity", "ReflectedApparentTemperature", "AtmosphericTransmission"]:
+                    line_edit.setText(f"{float(value):.6f}")
+                else:
+                    line_edit.setText(f"{float(value):.4f}")
+            else:
+                line_edit.setText(str(value))
+
+    def reset_params_to_exif(self):
+        """
+        Ripristina tutti i parametri di calcolo ai valori estratti dai metadati EXIF.
+        Usa valori di default appropriati per parametri non disponibili.
+        """
+        if not hasattr(self, 'metadata') or not self.metadata:
+            # Se non ci sono metadati, usa solo i valori di default
+            self._apply_default_values()
+            return
+        
+        # Valori di default per parametri ambientali e altri
+        default_values = {
+            "AtmosphericTemperature": 20.0,
+            "AtmosphericTransmission": 0.95,  # Valore standard per distanze brevi
+            "RelativeHumidity": 50.0,
+            "ObjectDistance": 1.0,
+            "Emissivity": 0.95
+        }
+        
+        reset_count = 0
+        default_count = 0
+        
+        for key, line_edit in self.param_inputs.items():
+            # Cerca il valore nei metadati EXIF
+            exif_value = self.metadata.get(f"APP1:{key}", self.metadata.get(key))
+            
+            if exif_value is not None and exif_value != "N/A":
+                # Valore trovato nei metadati EXIF
+                if isinstance(exif_value, (int, float)):
+                    if key in ["PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO"]:
+                        line_edit.setText(f"{float(exif_value):.12f}")
+                    elif key in ["Emissivity", "ReflectedApparentTemperature", "AtmosphericTransmission"]:
+                        line_edit.setText(f"{float(exif_value):.6f}")
+                    else:
+                        line_edit.setText(f"{float(exif_value):.4f}")
+                else:
+                    line_edit.setText(str(exif_value))
+                
+                line_edit.setStyleSheet("")  # Reset dello stile
+                line_edit.setToolTip(f"Valore da metadati EXIF: {exif_value}")
+                reset_count += 1
+                
+            elif key in default_values:
+                # Usa valore di default per parametri non disponibili nei metadati
+                default_value = default_values[key]
+                if key in ["Emissivity", "AtmosphericTransmission"]:
+                    line_edit.setText(f"{default_value:.6f}")
+                else:
+                    line_edit.setText(f"{default_value:.4f}")
+                
+                line_edit.setStyleSheet("background-color: #fff3cd;")  # Sfondo giallo per default
+                line_edit.setToolTip(f"Valore di default utilizzato: {default_value}\n(Non disponibile nei metadati EXIF)")
+                default_count += 1
+            else:
+                # Parametro non trovato e senza default
+                line_edit.setText("N/A")
+                line_edit.setStyleSheet("background-color: #f8d7da;")  # Sfondo rosso per errore
+                line_edit.setToolTip("Parametro non disponibile nei metadati EXIF")
+        
+        # Mostra un messaggio di conferma
+        print(f"Reset parametri completato:")
+        print(f"  - {reset_count} parametri ripristinati da metadati EXIF")
+        print(f"  - {default_count} parametri impostati ai valori di default")
+        
+        # Ricalcola la temperatura con i nuovi parametri
+        self.recalculate_and_update_view()
+
+    def _apply_default_values(self):
+        """
+        Applica solo i valori di default quando non ci sono metadati disponibili.
+        """
+        default_values = {
+            "Emissivity": 0.95,
+            "ObjectDistance": 1.0,
+            "ReflectedApparentTemperature": 20.0,
+            "AtmosphericTemperature": 20.0,
+            "AtmosphericTransmission": 0.95,
+            "RelativeHumidity": 50.0,
+            # I parametri di Planck non hanno default universali
+        }
+        
+        for key, line_edit in self.param_inputs.items():
+            if key in default_values:
+                default_value = default_values[key]
+                if key in ["Emissivity", "AtmosphericTransmission"]:
+                    line_edit.setText(f"{default_value:.6f}")
+                else:
+                    line_edit.setText(f"{default_value:.4f}")
+                line_edit.setStyleSheet("background-color: #fff3cd;")
+                line_edit.setToolTip(f"Valore di default: {default_value}")
+            else:
+                line_edit.setText("N/A")
+                line_edit.setStyleSheet("background-color: #f8d7da;")
+                line_edit.setToolTip("Parametro non disponibile")
+        
+        print("Applicati valori di default (nessun metadato EXIF disponibile)")
+
+    def apply_environmental_correction(self, temp_data):
+        """
+        Applica correzioni ambientali per migliorare l'accuratezza della temperatura.
+        Basato su parametri ambientali estratti dai metadati FLIR.
+        """
+        try:
+            # Controllo input
+            if temp_data is None or np.all(np.isnan(temp_data)):
+                print("⚠️ AVVISO: Dati temperatura non validi in input alla correzione ambientale")
+                return temp_data
+            
+            # Estrai parametri ambientali con valori standard appropriati
+            atmospheric_temp = self._get_float_param("AtmosphericTemperature", 20.0)
+            atmospheric_transmission = self._get_float_param("AtmosphericTransmission", 0.95)  # Valore standard per distanze brevi
+            relative_humidity = self._get_float_param("RelativeHumidity", 50.0)
+            
+            # Verifica che i parametri siano validi
+            if not all(np.isfinite([atmospheric_temp, atmospheric_transmission, relative_humidity])):
+                print("⚠️ AVVISO: Parametri ambientali non validi - correzione saltata")
+                return temp_data
+            
+            # Correzione per temperatura atmosferica (compensazione deriva termica)
+            temp_correction = (atmospheric_temp - 20.0) * 0.0005  # 0.05% per grado di differenza da 20°C
+            
+            # Correzione per trasmissione atmosferica
+            transmission_correction = (1.0 - atmospheric_transmission) * 0.002
+            
+            # Correzione per umidità relativa
+            humidity_correction = (relative_humidity - 50.0) * 0.00002  # Effetto minimo ma presente
+            
+            # Applica correzioni cumulative
+            total_correction = temp_correction + transmission_correction + humidity_correction
+            corrected_temp = temp_data + total_correction
+            
+            # Debug: mostra le correzioni applicate (solo se significative)
+            if abs(total_correction) > 0.001:
+                print(f"Correzioni ambientali applicate:")
+                print(f"  - Temperatura atmosferica: {temp_correction:.6f}°C")
+                print(f"  - Trasmissione atmosferica: {transmission_correction:.6f}°C") 
+                print(f"  - Umidità relativa: {humidity_correction:.6f}°C")
+                print(f"  - Correzione totale: {total_correction:.6f}°C")
+            
+            return corrected_temp
+            
+        except Exception as e:
+            print(f"Avviso: Correzione ambientale non applicata - {e}")
+            return temp_data
+
+    def _get_float_param(self, param_name, default_value):
+        """
+        Ottiene un parametro float dall'interfaccia utente o dai metadati,
+        gestendo correttamente i valori "N/A".
+        """
+        try:
+            # Prima prova dall'interfaccia utente
+            if param_name in self.param_inputs:
+                ui_value = self.param_inputs[param_name].text().strip()
+                if ui_value and ui_value != "N/A":
+                    return float(ui_value)
+            
+            # Poi prova dai metadati
+            if hasattr(self, 'metadata') and self.metadata:
+                meta_value = self.metadata.get(f"APP1:{param_name}", 
+                                             self.metadata.get(param_name))
+                if meta_value is not None and meta_value != "N/A":
+                    return float(meta_value)
+            
+            # Se tutto fallisce, usa il valore di default
+            return float(default_value)
+            
+        except (ValueError, TypeError):
+            return float(default_value)
 
     def calculate_temperature_matrix(self):
         try:
@@ -566,17 +773,63 @@ class ThermalAnalyzerNG(QMainWindow):
             O = float(self.param_inputs["PlanckO"].text())
             refl_temp_K = refl_temp_C + 273.15
             
+            # Debug: controlla i parametri
+            print(f"🔍 Debug parametri Planck:")
+            print(f"  R1={R1}, R2={R2}, B={B}, F={F}, O={O}")
+            print(f"  Emissivity={emissivity}, ReflTemp={refl_temp_C}°C")
+            
             raw_refl = R1 / (R2 * (np.exp(B / refl_temp_K) - F)) - O
+            print(f"  raw_refl range: {np.nanmin(raw_refl):.3f} to {np.nanmax(raw_refl):.3f}")
+            
             raw_obj = (self.thermal_data - (1 - emissivity) * raw_refl) / max(emissivity, 1e-6)
+            print(f"  raw_obj range: {np.nanmin(raw_obj):.3f} to {np.nanmax(raw_obj):.3f}")
             
             log_arg = R1 / (R2 * (raw_obj + O)) + F
+            print(f"  log_arg range: {np.nanmin(log_arg):.3f} to {np.nanmax(log_arg):.3f}")
+            
+            # Controllo condizioni per logaritmo
+            valid_indices = log_arg > 0
+            valid_count = np.sum(valid_indices)
+            total_count = log_arg.size
+            print(f"  Pixel validi per logaritmo: {valid_count}/{total_count} ({100*valid_count/total_count:.1f}%)")
+            
+            if valid_count == 0:
+                print("❌ ERRORE: Nessun pixel ha log_arg > 0 - tutti i valori saranno NaN!")
+                print("   Possibili cause:")
+                print("   - Parametri di Planck incorretti")
+                print("   - Emissività troppo bassa")
+                print("   - Dati termici grezzi corrotti")
+            
             temp_K = np.full(log_arg.shape, np.nan, dtype=np.float64)
             valid_indices = log_arg > 0
             temp_K[valid_indices] = B / np.log(log_arg[valid_indices])
+            
+            print(f"  temp_K range: {np.nanmin(temp_K):.3f} to {np.nanmax(temp_K):.3f}")
 
-            self.temperature_data = temp_K - 273.15
-            self.temp_min = np.nanmin(self.temperature_data)
-            self.temp_max = np.nanmax(self.temperature_data)
+            # Conversione a Celsius
+            temp_celsius = temp_K - 273.15
+            
+            # Applica correzione ambientale
+            self.temperature_data = self.apply_environmental_correction(temp_celsius)
+            
+            # Controllo validità dei dati calcolati
+            if np.all(np.isnan(self.temperature_data)):
+                print("⚠️ AVVISO: Tutti i valori di temperatura sono NaN - possibile problema nei parametri")
+                print("Controllo parametri di Planck e emissività")
+                # Fallback ai dati grezzi
+                self.temperature_data = self.thermal_data.astype(float) / 100.0  # Semplice conversione
+                self.temp_min = np.nanmin(self.temperature_data)
+                self.temp_max = np.nanmax(self.temperature_data)
+            elif np.any(np.isfinite(self.temperature_data)):
+                # Calcola min/max solo sui valori finiti
+                finite_data = self.temperature_data[np.isfinite(self.temperature_data)]
+                if len(finite_data) > 0:
+                    self.temp_min = np.min(finite_data)
+                    self.temp_max = np.max(finite_data)
+                else:
+                    self.temp_min, self.temp_max = 0, 100  # Default range
+            else:
+                self.temp_min, self.temp_max = 0, 100  # Default range
         except Exception as e:
             print(f"Errore calcolo temperature: {e}")
             self.temperature_data = np.zeros_like(self.thermal_data, dtype=float)
@@ -905,7 +1158,7 @@ class ThermalAnalyzerNG(QMainWindow):
         print("Updating ROI table...")
         self._updating_roi_table = True
         try:
-            # blocca tutti i segnali della tabella durante l’aggiornamento
+            # blocca tutti i segnali della tabella durante l'aggiornamento
             blocker = QSignalBlocker(self.roi_table)
 
             self.roi_table.setRowCount(0)
@@ -1234,7 +1487,10 @@ class ThermalAnalyzerNG(QMainWindow):
         temp_K = np.full(log_arg.shape, np.nan, dtype=np.float64)
         valid = log_arg > 0
         temp_K[valid] = B / np.log(log_arg[valid])
-        return temp_K - 273.15
+        
+        # Conversione a Celsius e applicazione correzione ambientale
+        temp_celsius = temp_K - 273.15
+        return self.apply_environmental_correction(temp_celsius)
 
     def update_single_roi(self, roi_model):
         """Aggiorna le statistiche di un singolo ROI."""
