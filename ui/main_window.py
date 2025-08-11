@@ -275,6 +275,7 @@ class ThermalAnalyzerNG(QMainWindow):
         
         # Configure table properties
         self.roi_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.roi_table.setSelectionMode(QTableWidget.MultiSelection)  # Aggiungi questa riga
         self.roi_table.setAlternatingRowColors(True)
         self.roi_table.setSortingEnabled(False)  # Disable sorting to maintain ROI order
         
@@ -1290,30 +1291,50 @@ class ThermalAnalyzerNG(QMainWindow):
             item_view.refresh_label()
 
     def delete_selected_roi(self):
-        """Elimina il ROI selezionato dalla tabella."""
-        current_row = self.roi_table.currentRow()
-        if current_row < 0:
-            QMessageBox.information(self, "No Selection", "Please select a ROI to delete.")
-            return
-            
-        if current_row >= len(self.rois):
-            return
-            
-        roi = self.rois[current_row]
+        """Elimina tutti i ROI selezionati dalla tabella."""
+        # Ottieni tutte le righe selezionate
+        selected_rows = []
+        for item in self.roi_table.selectedItems():
+            row = item.row()
+            if row not in selected_rows:
+                selected_rows.append(row)
         
-        # Remove from scene
-        if roi.id in self.roi_items:
-            roi_item = self.roi_items[roi.id]
-            self.image_view._scene.removeItem(roi_item)
-            del self.roi_items[roi.id]
+        if not selected_rows:
+            QMessageBox.information(self, "No Selection", "Please select one or more ROIs to delete.")
+            return
         
-        # Remove from model list
-        self.rois.pop(current_row)
+        # Ordina le righe in ordine decrescente per evitare problemi con gli indici durante la cancellazione
+        selected_rows.sort(reverse=True)
+        
+        # Conferma la cancellazione se ci sono più elementi
+        if len(selected_rows) > 1:
+            reply = QMessageBox.question(self, "Delete Multiple ROIs", 
+                                       f"Are you sure you want to delete {len(selected_rows)} ROIs?",
+                                       QMessageBox.Yes | QMessageBox.No,
+                                       QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+        
+        # Elimina tutti i ROI selezionati
+        for row in selected_rows:
+            if row >= len(self.rois):
+                continue
+                
+            roi = self.rois[row]
+            
+            # Remove from scene
+            if roi.id in self.roi_items:
+                roi_item = self.roi_items[roi.id]
+                self.image_view._scene.removeItem(roi_item)
+                del self.roi_items[roi.id]
+            
+            # Remove from model list
+            self.rois.pop(row)
+            
+            print(f"Deleted ROI: {roi.name}")
         
         # Update analysis after deletion
         self.update_roi_analysis()
-        
-        print(f"Deleted ROI: {roi.name}")
 
     def clear_all_rois(self):
         """Rimuove tutti i ROI."""
