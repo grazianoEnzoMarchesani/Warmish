@@ -1078,3 +1078,19 @@ class ThermalAnalyzerNG(QMainWindow):
         valid = log_arg > 0
         temp_K[valid] = B / np.log(log_arg[valid])
         return temp_K - 273.15
+
+    def update_single_roi(self, roi_model):
+        import numpy as np
+        temps = self.compute_roi_temperatures(roi_model)
+        if temps is not None:
+            valid = temps[~np.isnan(temps)]
+            if valid.size > 0:
+                roi_model.temp_min = float(np.min(valid))
+                roi_model.temp_max = float(np.max(valid))
+                roi_model.temp_mean = float(np.mean(valid))
+                roi_model.temp_std  = float(np.std(valid))
+            else:
+                roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
+        else:
+            roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
+        self.update_roi_table()
