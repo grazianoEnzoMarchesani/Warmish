@@ -1,6 +1,7 @@
 import sys
 import json
 import io
+import os  # AGGIUNGO QUESTO IMPORT
 import subprocess
 import exiftool
 import numpy as np
@@ -426,10 +427,19 @@ class ThermalAnalyzerNG(QMainWindow):
         self.temp_roi_item = None  # Item temporaneo per feedback visivo durante il disegno
         self.is_drawing_roi = False  # Flag per indicare se siamo in modalità disegno
         self._updating_roi_table = False
+        
+        # Salvataggio automatico
+        self.current_image_path = None  # Percorso del file JPG correntemente aperto
+        self._ignore_auto_save = False  # Flag per evitare salvataggi durante il caricamento
 
     def open_image(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleziona Immagine FLIR", "", "Immagini JPEG (*.jpg *.jpeg)")
         if not file_path: return
+
+        # Aggiungo subito dopo la riga 432:
+        
+        # Salva il percorso del file corrente
+        self.current_image_path = file_path
 
         try:
             self.setWindowTitle(f"Warmish - {file_path.split('/')[-1]}")
@@ -494,6 +504,16 @@ class ThermalAnalyzerNG(QMainWindow):
                 self.thermal_data = np.frombuffer(raw_thermal_bytes, dtype=np.uint16).reshape((height, width))
 
             self.update_analysis()
+            
+            # AGGIUNGO QUI IL CARICAMENTO AUTOMATICO:
+            # Carica le impostazioni dal JSON se esiste
+            self.load_settings_from_json()
+            
+            # Connetti i segnali per l'auto-salvataggio (solo una volta)
+            if not hasattr(self, '_auto_save_connected'):
+                self.connect_auto_save_signals()
+                self._auto_save_connected = True
+            
             # QMessageBox.information(self, "Successo", "Immagine radiometrica caricata con successo!")
 
         except Exception as e:
@@ -874,6 +894,7 @@ class ThermalAnalyzerNG(QMainWindow):
     def on_invert_palette(self):
         self.palette_inverted = not self.palette_inverted
         self.update_view_only()  # Solo ricolorazione
+        self.save_settings_to_json()
 
     # NUOVO METODO: Gestione mouse move sulla mappa termica
     def on_thermal_mouse_move(self, point: QPointF):
@@ -1335,6 +1356,7 @@ class ThermalAnalyzerNG(QMainWindow):
         
         # Update analysis after deletion
         self.update_roi_analysis()
+        self.save_settings_to_json()
 
     def clear_all_rois(self):
         """Rimuove tutti i ROI."""
@@ -1360,6 +1382,8 @@ class ThermalAnalyzerNG(QMainWindow):
             self.update_roi_analysis()
             
             print("Cleared all ROIs")
+        if hasattr(self, 'current_image_path') and self.current_image_path:
+            self.save_settings_to_json()
 
     def activate_spot_tool(self):
         """Attiva lo strumento per creare spot ROI."""
@@ -1549,6 +1573,7 @@ class ThermalAnalyzerNG(QMainWindow):
             item.refresh_label()
 
         self.update_roi_table()
+        self.save_settings_to_json()
 
     def on_label_settings_changed(self):
         self.roi_label_settings = {
@@ -1563,3 +1588,249 @@ class ThermalAnalyzerNG(QMainWindow):
         for item in self.roi_items.values():
             if hasattr(item, "refresh_label"):
                 item.refresh_label()
+
+    # Metodi per il salvataggio automatico (li aggiungo alla fine della classe)
+    
+    def get_json_file_path(self):
+        """Restituisce il percorso del file JSON associato all'immagine corrente."""
+        if not self.current_image_path:
+            return None
+        
+        import os
+        base_path = os.path.splitext(self.current_image_path)[0]
+        return f"{base_path}.json"
+    
+    def save_settings_to_json(self):
+        """Salva tutte le impostazioni nel file JSON."""
+        if not self.current_image_path or self._ignore_auto_save:
+            return
+        
+        json_path = self.get_json_file_path()
+        if not json_path:
+            return
+        
+        try:
+            # Raccogli i parametri termici da salvare
+            thermal_params = {}
+            params_to_save = ["Emissivity", "AtmosphericTemperature", "AtmosphericTransmission", "RelativeHumidity"]
+            for param in params_to_save:
+                if param in self.param_inputs and self.param_inputs[param].text():
+                    try:
+                        thermal_params[param] = float(self.param_inputs[param].text())
+                    except ValueError:
+                        pass  # Ignora valori non validi
+            
+            # Raccogli i ROI
+            rois_data = []
+            for roi in self.rois:
+                roi_data = {
+                    "type": roi.__class__.__name__,
+                    "name": roi.name,
+                    "emissivity": getattr(roi, 'emissivity', 0.95)
+                }
+                
+                if hasattr(roi, 'x') and hasattr(roi, 'y'):  # RectROI e SpotROI
+                    roi_data["x"] = roi.x
+                    roi_data["y"] = roi.y
+                
+                if hasattr(roi, 'width') and hasattr(roi, 'height'):  # RectROI
+                    roi_data["width"] = roi.width
+                    roi_data["height"] = roi.height
+                elif hasattr(roi, 'radius'):  # SpotROI
+                    roi_data["radius"] = roi.radius
+                elif hasattr(roi, 'points'):  # PolygonROI
+                    roi_data["points"] = roi.points
+                
+                rois_data.append(roi_data)
+            
+            # Raccogli le impostazioni overlay
+            overlay_settings = {
+                "scale": self.scale_spin.value() if hasattr(self, 'scale_spin') else 1.0,
+                "offset_x": self.offsetx_spin.value() if hasattr(self, 'offsetx_spin') else 0,
+                "offset_y": self.offsety_spin.value() if hasattr(self, 'offsety_spin') else 0,
+                "opacity": self.overlay_alpha_slider.value() if hasattr(self, 'overlay_alpha_slider') else 50,
+                "blend_mode": self.blend_combo.currentText() if hasattr(self, 'blend_combo') else "Normal"
+            }
+            
+            # Compone il dizionario completo
+            settings_data = {
+                "version": "1.0",
+                "thermal_parameters": thermal_params,
+                "rois": rois_data,
+                "palette": self.palette_combo.currentText() if hasattr(self, 'palette_combo') else "Iron",
+                "palette_inverted": getattr(self, 'palette_inverted', False),
+                "overlay_settings": overlay_settings
+            }
+            
+            # Salva nel file JSON
+            import os
+            os.makedirs(os.path.dirname(json_path), exist_ok=True)
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(settings_data, f, indent=2, ensure_ascii=False)
+            
+            print(f"Impostazioni salvate in: {json_path}")
+            
+        except Exception as e:
+            print(f"Errore nel salvataggio delle impostazioni: {e}")
+    
+    def load_settings_from_json(self):
+        """Carica le impostazioni dal file JSON se esiste."""
+        if not self.current_image_path:
+            return
+        
+        json_path = self.get_json_file_path()
+        if not json_path or not os.path.exists(json_path):
+            return
+        
+        try:
+            self._ignore_auto_save = True  # Previeni salvataggi durante il caricamento
+            
+            with open(json_path, 'r', encoding='utf-8') as f:
+                settings_data = json.load(f)
+            
+            print(f"Caricando impostazioni da: {json_path}")
+            
+            # Carica i parametri termici
+            if "thermal_parameters" in settings_data:
+                for param, value in settings_data["thermal_parameters"].items():
+                    if param in self.param_inputs:
+                        self.param_inputs[param].setText(str(value))
+            
+            # Carica la palette
+            if "palette" in settings_data:
+                palette_name = settings_data["palette"]
+                palette_index = self.palette_combo.findText(palette_name)
+                if palette_index >= 0:
+                    self.palette_combo.setCurrentIndex(palette_index)
+            
+            if "palette_inverted" in settings_data:
+                self.palette_inverted = settings_data["palette_inverted"]
+            
+            # Carica le impostazioni overlay
+            if "overlay_settings" in settings_data:
+                overlay = settings_data["overlay_settings"]
+                
+                if "scale" in overlay and hasattr(self, 'scale_spin'):
+                    self.scale_spin.setValue(overlay["scale"])
+                if "offset_x" in overlay and hasattr(self, 'offsetx_spin'):
+                    self.offsetx_spin.setValue(overlay["offset_x"])
+                if "offset_y" in overlay and hasattr(self, 'offsety_spin'):
+                    self.offsety_spin.setValue(overlay["offset_y"])
+                if "opacity" in overlay and hasattr(self, 'overlay_alpha_slider'):
+                    self.overlay_alpha_slider.setValue(overlay["opacity"])
+                if "blend_mode" in overlay and hasattr(self, 'blend_combo'):
+                    blend_index = self.blend_combo.findText(overlay["blend_mode"])
+                    if blend_index >= 0:
+                        self.blend_combo.setCurrentIndex(blend_index)
+            
+            # Carica i ROI
+            if "rois" in settings_data:
+                self.load_rois_from_data(settings_data["rois"])
+            
+            print(f"Impostazioni caricate con successo da: {json_path}")
+            
+        except Exception as e:
+            print(f"Errore nel caricamento delle impostazioni: {e}")
+        finally:
+            self._ignore_auto_save = False
+    
+    def load_rois_from_data(self, rois_data):
+        """Carica i ROI dai dati JSON."""
+        # Prima pulisci i ROI esistenti
+        self.clear_all_rois()
+        
+        from analysis.roi_models import RectROI, SpotROI, PolygonROI
+        from ui.roi_items import RectROIItem, SpotROIItem, PolygonROIItem
+        from PySide6.QtGui import QColor
+        
+        for roi_data in rois_data:
+            try:
+                roi_type = roi_data.get("type", "")
+                roi_name = roi_data.get("name", "ROI")
+                roi_emissivity = roi_data.get("emissivity", 0.95)
+                
+                # Crea il modello ROI appropriato
+                roi_model = None
+                roi_item = None
+                
+                if roi_type == "RectROI":
+                    x = roi_data.get("x", 0)
+                    y = roi_data.get("y", 0)
+                    width = roi_data.get("width", 50)
+                    height = roi_data.get("height", 50)
+                    
+                    roi_model = RectROI(x=x, y=y, width=width, height=height, name=roi_name)
+                    roi_model.emissivity = roi_emissivity
+                    
+                    # Crea l'item grafico come figlio dell'item termico
+                    if hasattr(self, 'image_view') and hasattr(self.image_view, '_thermal_item'):
+                        roi_item = RectROIItem(roi_model, parent=self.image_view._thermal_item)
+                
+                elif roi_type == "SpotROI":
+                    x = roi_data.get("x", 0)
+                    y = roi_data.get("y", 0)
+                    radius = roi_data.get("radius", 5)
+                    
+                    roi_model = SpotROI(x=x, y=y, radius=radius, name=roi_name)
+                    roi_model.emissivity = roi_emissivity
+                    
+                    if hasattr(self, 'image_view') and hasattr(self.image_view, '_thermal_item'):
+                        roi_item = SpotROIItem(roi_model, parent=self.image_view._thermal_item)
+                
+                elif roi_type == "PolygonROI":
+                    points = roi_data.get("points", [(0, 0), (50, 0), (50, 50), (0, 50)])
+                    
+                    roi_model = PolygonROI(points=points, name=roi_name)
+                    roi_model.emissivity = roi_emissivity
+                    
+                    if hasattr(self, 'image_view') and hasattr(self.image_view, '_thermal_item'):
+                        roi_item = PolygonROIItem(roi_model, parent=self.image_view._thermal_item)
+                
+                if roi_model and roi_item:
+                    # Aggiungi alle collezioni
+                    self.rois.append(roi_model)
+                    self.roi_items[roi_model.id] = roi_item
+                    
+                    # Imposta il colore (ciclo sulla ruota HSV come nell'originale)
+                    hue = (len(self.rois) * 55) % 360
+                    color = QColor.fromHsv(hue, 220, 255)
+                    roi_model.color = color
+                    roi_item.set_color(color)
+                    roi_item.setZValue(10)
+                    
+                    print(f"ROI caricato: {roi_model}")
+            
+            except Exception as e:
+                print(f"Errore nel caricamento del ROI: {e}")
+        
+        # Aggiorna l'analisi e la tabella
+        self.update_roi_analysis()
+    
+    def connect_auto_save_signals(self):
+        """Connette tutti i segnali per il salvataggio automatico."""
+        # Parametri termici
+        for param_input in self.param_inputs.values():
+            if hasattr(param_input, 'editingFinished'):
+                param_input.editingFinished.connect(self.save_settings_to_json)
+        
+        # Palette
+        if hasattr(self, 'palette_combo'):
+            self.palette_combo.currentTextChanged.connect(self.save_settings_to_json)
+        
+        # Controlli overlay
+        if hasattr(self, 'scale_spin'):
+            self.scale_spin.valueChanged.connect(self.save_settings_to_json)
+        if hasattr(self, 'offsetx_spin'):
+            self.offsetx_spin.valueChanged.connect(self.save_settings_to_json)
+        if hasattr(self, 'offsety_spin'):
+            self.offsety_spin.valueChanged.connect(self.save_settings_to_json)
+        if hasattr(self, 'overlay_alpha_slider'):
+            self.overlay_alpha_slider.valueChanged.connect(self.save_settings_to_json)
+        if hasattr(self, 'blend_combo'):
+            self.blend_combo.currentTextChanged.connect(self.save_settings_to_json)
+        
+        # Inversione palette
+        if hasattr(self, 'action_invert_palette'):
+            self.action_invert_palette.triggered.connect(self.save_settings_to_json)
+        
+        print("Segnali di auto-salvataggio connessi")
