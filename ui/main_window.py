@@ -939,7 +939,14 @@ class ThermalAnalyzerNG(QMainWindow):
 
                 for item in [min_item, max_item, avg_item, median_item]:
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                    item.setBackground(QColor(240, 240, 240))
+                    # Rimozione del colore di sfondo hardcoded per supportare il tema scuro
+                    # item.setBackground(QColor(240, 240, 240))  # Commentato
+                    
+                    # Usa il colore di sistema per elementi disabilitati
+                    from PySide6.QtWidgets import QApplication
+                    palette = QApplication.palette()
+                    disabled_color = palette.color(palette.ColorRole.Window)
+                    item.setBackground(disabled_color)
 
                 self.roi_table.setItem(row, 2, min_item)
                 self.roi_table.setItem(row, 3, max_item)

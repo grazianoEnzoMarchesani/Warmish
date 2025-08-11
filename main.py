@@ -78,6 +78,14 @@ def fade_out_and_close(widget, duration_ms: int, finished_cb=None):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    
+    # Ottimizzazioni per Windows 11
+    if sys.platform == "win32":
+        # Migliore rendering su Windows
+        app.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+        # Supporto nativo per tema scuro Windows 11
+        app.setStyle("windowsvista")
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     svg_path = os.path.join(base_dir, "Warmish Logo.svg") # Assicurati che il logo sia nella cartella principale

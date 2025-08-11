@@ -135,7 +135,12 @@ class ColorBarLegend(QWidget):
             for idx, val in enumerate(values):
                 t = (val - vmin) / rng  # 0..1 bottom -> top mapping
                 y = int(bar_y + (1.0 - t) * bar_h)
-                p.setPen(QPen(QColor(40, 40, 40), 1))
+                
+                # Usa il colore del testo di sistema invece di hardcoded
+                from PySide6.QtWidgets import QApplication
+                text_color = QApplication.palette().color(QApplication.palette().ColorRole.Text)
+                p.setPen(QPen(text_color, 1))
+                
                 p.drawLine(bar_x + bar_w, y, bar_x + bar_w + tick_len, y)
                 label = f"{val:.{self._precision}f}" + (f" {self._unit}" if self._show_units_on_ticks else "")
                 p.drawText(bar_x + bar_w + tick_len + label_gap, y + fm.ascent() // 2, label)
