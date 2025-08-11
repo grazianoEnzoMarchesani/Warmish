@@ -96,3 +96,24 @@ class RectROI:
     
     def __str__(self):
         return f"RectROI(name='{self.name}', x={self.x}, y={self.y}, w={self.width}, h={self.height})"
+
+class SpotROI:
+    """
+    Punto/cerchio ROI con centro (x,y) e raggio in pixel termici.
+    """
+    def __init__(self, x: float, y: float, radius: float = 5.0, name: str = ""):
+        import uuid
+        from typing import Optional
+        self.id = uuid.uuid4()
+        self.x = x
+        self.y = y
+        self.radius = radius
+        self.name = name if name else f"Spot_{str(self.id)[:8]}"
+        self.temp_min: Optional[float] = None
+        self.temp_max: Optional[float] = None
+        self.temp_mean: Optional[float] = None
+        self.temp_std: Optional[float] = None
+        self.temp_median: Optional[float] = None
+
+    def __str__(self):
+        return f"SpotROI(name='{self.name}', x={self.x}, y={self.y}, r={self.radius})"

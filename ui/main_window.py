@@ -289,6 +289,34 @@ class ThermalAnalyzerNG(QMainWindow):
         roi_controls_layout.addStretch()
         self.roi_table_layout.addLayout(roi_controls_layout)
         
+        # Opzioni label ROI
+        label_opts_layout = QHBoxLayout()
+        label_opts_layout.addWidget(QLabel("Show in labels:"))
+
+        self.roi_label_settings = {
+            "name": True,
+            "emissivity": True,
+            "min": True,
+            "max": True,
+            "avg": True,
+            "median": False,
+        }
+
+        self.cb_label_name  = QCheckBox("Name");    self.cb_label_name.setChecked(self.roi_label_settings["name"])
+        self.cb_label_eps   = QCheckBox("ε");       self.cb_label_eps.setChecked(self.roi_label_settings["emissivity"])
+        self.cb_label_min   = QCheckBox("Min");     self.cb_label_min.setChecked(self.roi_label_settings["min"])
+        self.cb_label_max   = QCheckBox("Max");     self.cb_label_max.setChecked(self.roi_label_settings["max"])
+        self.cb_label_avg   = QCheckBox("Avg");     self.cb_label_avg.setChecked(self.roi_label_settings["avg"])
+        self.cb_label_med   = QCheckBox("Median");  self.cb_label_med.setChecked(self.roi_label_settings["median"])
+
+        for cb in [self.cb_label_name, self.cb_label_eps, self.cb_label_min,
+                   self.cb_label_max, self.cb_label_avg, self.cb_label_med]:
+            cb.toggled.connect(self.on_label_settings_changed)
+            label_opts_layout.addWidget(cb)
+
+        label_opts_layout.addStretch()
+        self.roi_table_layout.addLayout(label_opts_layout)
+
         self.tab_areas_layout.addWidget(self.roi_table_group)
 
         self.sidebar_tabs.addTab(self.tab_areas, "Aree & Analisi")
@@ -839,14 +867,21 @@ class ThermalAnalyzerNG(QMainWindow):
                     roi_model.temp_max = float(np.max(valid))
                     roi_model.temp_mean = float(np.mean(valid))
                     roi_model.temp_std = float(np.std(valid))
+                    roi_model.temp_median = float(np.median(valid))
                 else:
-                    roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
+                    roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = roi_model.temp_median = None
             else:
-                roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
+                roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = roi_model.temp_median = None
         
         # Update the ROI table with new data
         self.update_roi_table()
         
+        # Update label for each ROI after calculating stats
+        for roi_model in self.rois:
+            item = self.roi_items.get(roi_model.id)
+            if item and hasattr(item, "refresh_label"):
+                item.refresh_label()
+
         print(f"ROI analysis completed. Total ROIs: {len(self.rois)}")
 
     def update_roi_table(self):
@@ -879,7 +914,9 @@ class ThermalAnalyzerNG(QMainWindow):
                     min_item = QTableWidgetItem(f"{roi.temp_min:.2f}")
                     max_item = QTableWidgetItem(f"{roi.temp_max:.2f}")
                     avg_item = QTableWidgetItem(f"{roi.temp_mean:.2f}")
-                    median_value = self.calculate_roi_median(roi)
+                    median_value = getattr(roi, 'temp_median', None)
+                    if median_value is None:
+                        median_value = self.calculate_roi_median(roi)
                     median_item = QTableWidgetItem(f"{median_value:.2f}" if median_value is not None else "N/A")
                 else:
                     min_item = QTableWidgetItem("N/A")
@@ -973,6 +1010,11 @@ class ThermalAnalyzerNG(QMainWindow):
                 item.setText(f"{emissivity_value:.3f}")
                 QMessageBox.warning(self, "Invalid Emissivity", 
                                   "Please enter a valid number for emissivity")
+
+        # Update label for the specific ROI item
+        item_view = self.roi_items.get(roi.id)
+        if item_view and hasattr(item_view, "refresh_label"):
+            item_view.refresh_label()
 
     def delete_selected_roi(self):
         """Elimina il ROI selezionato dalla tabella."""
@@ -1089,8 +1131,28 @@ class ThermalAnalyzerNG(QMainWindow):
                 roi_model.temp_max = float(np.max(valid))
                 roi_model.temp_mean = float(np.mean(valid))
                 roi_model.temp_std  = float(np.std(valid))
+                roi_model.temp_median = float(np.median(valid))       # <-- aggiunto
             else:
-                roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
+                roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = roi_model.temp_median = None
         else:
-            roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = None
+            roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = roi_model.temp_std = roi_model.temp_median = None
+
+        item = self.roi_items.get(roi_model.id)
+        if item and hasattr(item, "refresh_label"):
+            item.refresh_label()
+
         self.update_roi_table()
+
+    def on_label_settings_changed(self):
+        self.roi_label_settings = {
+            "name": self.cb_label_name.isChecked(),
+            "emissivity": self.cb_label_eps.isChecked(),
+            "min": self.cb_label_min.isChecked(),
+            "max": self.cb_label_max.isChecked(),
+            "avg": self.cb_label_avg.isChecked(),
+            "median": self.cb_label_med.isChecked(),
+        }
+        # Aggiorna tutti i label dei ROI
+        for item in self.roi_items.values():
+            if hasattr(item, "refresh_label"):
+                item.refresh_label()

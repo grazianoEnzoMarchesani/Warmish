@@ -5,7 +5,7 @@ This module contains QGraphicsItem-based classes for visually representing
 ROIs (Regions of Interest) in a QGraphicsScene.
 """
 
-from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem
+from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem, QGraphicsTextItem, QCheckBox, QHBoxLayout, QLabel
 from PySide6.QtGui import QPen, QBrush, QColor, QCursor
 from PySide6.QtCore import Qt, QRectF, QPointF
 from analysis.roi_models import RectROI
@@ -50,6 +50,18 @@ class RectROIItem(QGraphicsRectItem):
         self._handle_size = 10  # px
         self.setPos(model.x, model.y)
         self._press_parent_pos = QPointF()
+        
+        # Colore iniziale (dal modello se presente)
+        self._color = getattr(self.model, "color", QColor(255, 165, 0))
+        self._apply_color(self._color)
+        
+        # Label: nome + statistiche; non scala con lo zoom
+        self.label = QGraphicsTextItem("", self)
+        self.label.setDefaultTextColor(Qt.white)
+        self.label.setZValue(self.zValue() + 1)
+        self.label.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self.refresh_label()
+        self._update_label_pos()
     
     def _setup_appearance(self):
         """Set up the visual appearance of the ROI item."""
@@ -93,6 +105,7 @@ class RectROIItem(QGraphicsRectItem):
         # Update the rectangle geometry
         self.setRect(QRectF(0, 0, self.model.width, self.model.height))
         self.setPos(self.model.x, self.model.y)
+        self._update_label_pos()
     
     def get_model_id(self):
         """
@@ -199,6 +212,7 @@ class RectROIItem(QGraphicsRectItem):
             # Applica
             self.setPos(QPointF(nx, ny))
             self.setRect(QRectF(0, 0, nw, nh))
+            self._update_label_pos()
 
             # Sync modello live
             self.model.x = int(nx)
@@ -234,3 +248,49 @@ class RectROIItem(QGraphicsRectItem):
             view = view_list[0]
             if hasattr(view, "_main_window") and hasattr(view._main_window, "update_single_roi"):
                 view._main_window.update_single_roi(self.model)
+    
+    def _apply_color(self, color: QColor):
+        pen = QPen(color, 2)
+        pen.setStyle(Qt.SolidLine)
+        self.setPen(pen)
+        fill = QColor(color)
+        fill.setAlpha(40)
+        self.setBrush(QBrush(fill))
+    
+    def set_color(self, color: QColor):
+        self._color = color
+        setattr(self.model, "color", color)
+        self._apply_color(color)
+    
+    def refresh_label(self):
+        m = self.model
+        # Recupera le impostazioni dalla MainWindow
+        settings = {
+            "name": True, "emissivity": True, "min": True, "max": True, "avg": True, "median": False
+        }
+        views = self.scene().views()
+        if views:
+            mw = getattr(views[0], "_main_window", None)
+            if mw and hasattr(mw, "roi_label_settings"):
+                settings = mw.roi_label_settings
+
+        def fmt(v): return f"{v:.2f}" if (v is not None) else "N/A"
+        parts1 = []
+        if settings.get("name", True): parts1.append(m.name)
+        if settings.get("emissivity", True): parts1.append(f"ε {getattr(m, 'emissivity', 0.95):.3f}")
+        line1 = " | ".join(parts1)
+
+        parts2 = []
+        if settings.get("min", True): parts2.append(f"min {fmt(getattr(m, 'temp_min', None))}")
+        if settings.get("max", True): parts2.append(f"max {fmt(getattr(m, 'temp_max', None))}")
+        if settings.get("avg", True): parts2.append(f"avg {fmt(getattr(m, 'temp_mean', None))}")
+        if settings.get("median", False): parts2.append(f"med {fmt(getattr(m, 'temp_median', None))}")
+        line2 = " | ".join(parts2)
+
+        text = line1 if line2 == "" else f"{line1}\n{line2}"
+        self.label.setPlainText(text)
+        self._update_label_pos()
+    
+    def _update_label_pos(self):
+        # angolo alto-sinistra del rettangolo con piccolo offset
+        self.label.setPos(self.rect().left() + 2, self.rect().top() - self.label.boundingRect().height() - 2)

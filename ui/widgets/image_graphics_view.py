@@ -1,5 +1,5 @@
 from typing import Optional
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QStyleOptionGraphicsItem, QGraphicsRectItem
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QStyleOptionGraphicsItem, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem
 from PySide6.QtCore import Qt, QPointF, Signal, QRectF
 from PySide6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QTransform, QPen, QBrush, QColor
 
@@ -523,6 +523,12 @@ class ImageGraphicsView(QGraphicsView):
 
         # 6) aggiorna analisi/tabella
         self._main_window.update_roi_analysis()
+        
+        # Colore per-ROI (ciclo sulla ruota HSV)
+        hue = (len(self._main_window.rois) * 55) % 360
+        color = QColor.fromHsv(hue, 220, 255)
+        roi_model.color = color
+        roi_item.set_color(color)
         
         print(f"Created ROI: {roi_model}")
 
