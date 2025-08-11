@@ -563,9 +563,10 @@ class SpotROIItem(QGraphicsEllipseItem):
     
     def _update_label_pos(self):
         """Update the label position relative to the circle."""
-        # Position label above the circle with small offset
-        label_x = -self.label.boundingRect().width() / 2
-        label_y = -self.model.radius - self.label.boundingRect().height() - 2
+        # Position label above the circle with small offset, similar to RectROI approach
+        rect = self.rect()
+        label_x = rect.left() + 2  # Small offset from left edge
+        label_y = rect.top() - self.label.boundingRect().height() - 2
         self.label.setPos(label_x, label_y)
 
 
@@ -785,8 +786,8 @@ class PolygonROIItem(QGraphicsPolygonItem):
     
     def _update_label_pos(self):
         """Update the label position relative to the polygon."""
-        # Position label at the center of the bounding box
+        # Position label above the polygon's bounding box, similar to RectROI approach
         bbox = self.polygon().boundingRect()
-        label_x = bbox.center().x() - self.label.boundingRect().width() / 2
+        label_x = bbox.left() + 2  # Small offset from left edge
         label_y = bbox.top() - self.label.boundingRect().height() - 2
         self.label.setPos(label_x, label_y)
