@@ -16,11 +16,13 @@
 *   **Synchronized Dual View:** When not in overlay mode, the application displays the thermal and visible images in two separate, perfectly synchronized panels for zoom and pan.
 
 ---
- Live Demo on YouTube
-See Warmish in action! This video demonstrates the fluid workflow, from loading an image to performing advanced ROI analysis. Click the preview below to watch:
+
+## Live Demo
+
 <a href="https://youtu.be/qJgL65pQXTE" title="Watch the Demo on YouTube">
-<img src="https://img.youtube.com/vi/qJgL65pQXTE/maxresdefault.jpg" alt="Warmish Demo on YouTube" style="width:100%;">
+  <img src="https://img.youtube.com/vi/qJgL65pQXTE/maxresdefault.jpg" alt="Warmish Demo on YouTube" style="width:100%;">
 </a>
+
 ---
 
 ## Key Features
