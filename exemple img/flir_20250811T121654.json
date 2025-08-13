@@ -8,22 +8,61 @@
   },
   "rois": [
     {
-      "type": "RectROI",
-      "name": "ROI_1",
+      "type": "PolygonROI",
+      "name": "Polygon_1",
       "emissivity": 0.95,
-      "x": 248,
-      "y": 109,
-      "width": 190.28132992327363,
-      "height": 448.0818414322251
+      "points": [
+        [
+          410.8439897698209,
+          152.83887468030687
+        ],
+        [
+          518.8746803069052,
+          306.2915601023018
+        ],
+        [
+          636.7263427109974,
+          152.83887468030687
+        ],
+        [
+          410.8439897698209,
+          152.83887468030687
+        ]
+      ]
+    },
+    {
+      "type": "SpotROI",
+      "name": "Spot_2",
+      "emissivity": 0.95,
+      "x": 208.28644501278774,
+      "y": 199.48849104859332,
+      "radius": 89.79539641943734
+    },
+    {
+      "type": "SpotROI",
+      "name": "Spot_3",
+      "emissivity": 0.95,
+      "x": 469.7698209718669,
+      "y": 280.5115089514066,
+      "radius": 79.9744245524297
+    },
+    {
+      "type": "RectROI",
+      "name": "ROI_4",
+      "emissivity": 0.95,
+      "x": 225,
+      "y": 332,
+      "width": 223.42710997442455,
+      "height": 130.1278772378517
     }
   ],
-  "palette": "Cividis",
+  "palette": "Arctic",
   "palette_inverted": false,
   "overlay_settings": {
     "scale": 0.731,
     "offset_x": -112,
     "offset_y": -42,
-    "opacity": 50,
-    "blend_mode": "Normal"
+    "opacity": 100,
+    "blend_mode": "Exclusion"
   }
 }

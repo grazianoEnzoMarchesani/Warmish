@@ -41,26 +41,26 @@ class RectROIItem(QGraphicsRectItem):
         
         # Set visual appearance
         self._setup_appearance()
-        self.setZValue(10)  # ROI sempre sopra le immagini
+        self.setZValue(10)  # ROI always above images
         self.setAcceptHoverEvents(True)
         self._resizing = False
         self._resize_handle = None
         self._orig_rect = QRectF()
         self._orig_pos = QPointF()
-        self._handle_size = 10  # px
+        self._handle_size = 10  # pixels
         self.setPos(model.x, model.y)
         self._press_parent_pos = QPointF()
         
-        # Feedback visivo migliorato
+        # Enhanced visual feedback
         self._show_handles = False
         self._hovered_handle = None
-        self._handle_items = {}  # Dizionario degli handle visibili
+        self._handle_items = {}  # Dictionary of visible handles
         
-        # Colore iniziale (dal modello se presente)
+        # Initial color (from model if present)
         self._color = getattr(self.model, "color", QColor(255, 165, 0))
         self._apply_color(self._color)
         
-        # Label: nome + statistiche; non scala con lo zoom
+        # Label: name + statistics; does not scale with zoom
         self.label = QGraphicsTextItem("", self)
         self.label.setDefaultTextColor(Qt.white)
         self.label.setZValue(self.zValue() + 1)
@@ -81,13 +81,13 @@ class RectROIItem(QGraphicsRectItem):
         self.setBrush(brush)
     
     def _create_handle_items(self):
-        """Crea gli handle visibili per il ridimensionamento."""
+        """Create visible handles for resizing."""
         if self._handle_items:
-            return  # Già creati
+            return  # Already created
         
         handle_centers = self._handle_centers()
         for handle_key, center in handle_centers.items():
-            # Crea un piccolo rettangolo per l'handle
+            # Create a small rectangle for the handle
             handle_rect = QGraphicsRectItem(
                 center.x() - self._handle_size/2, 
                 center.y() - self._handle_size/2,
@@ -96,18 +96,18 @@ class RectROIItem(QGraphicsRectItem):
                 self
             )
             
-            # Stile dell'handle
+            # Handle style
             handle_pen = QPen(QColor(255, 255, 255), 1)
-            handle_brush = QBrush(QColor(100, 150, 255, 180))  # Blu semi-trasparente
+            handle_brush = QBrush(QColor(100, 150, 255, 180))  # Semi-transparent blue
             handle_rect.setPen(handle_pen)
             handle_rect.setBrush(handle_brush)
             handle_rect.setZValue(self.zValue() + 2)
-            handle_rect.hide()  # Nascosto per default
+            handle_rect.hide()  # Hidden by default
             
             self._handle_items[handle_key] = handle_rect
     
     def _update_handle_positions(self):
-        """Aggiorna le posizioni degli handle."""
+        """Update handle positions."""
         if not self._handle_items:
             return
             
@@ -123,7 +123,7 @@ class RectROIItem(QGraphicsRectItem):
                 )
     
     def _show_hide_handles(self, show: bool):
-        """Mostra o nasconde gli handle."""
+        """Show or hide handles."""
         if show and not self._handle_items:
             self._create_handle_items()
         
@@ -132,17 +132,17 @@ class RectROIItem(QGraphicsRectItem):
                 handle_item.setVisible(show)
     
     def _highlight_handle(self, handle_key: str = None):
-        """Evidenzia un handle specifico o rimuove l'evidenziazione."""
+        """Highlight a specific handle or remove highlighting."""
         if not self._handle_items:
             return
             
         for key, handle_item in self._handle_items.items():
             if key == handle_key:
-                # Evidenzia questo handle
-                highlight_brush = QBrush(QColor(255, 150, 0, 220))  # Arancione vivace
+                # Highlight this handle
+                highlight_brush = QBrush(QColor(255, 150, 0, 220))  # Bright orange
                 handle_item.setBrush(highlight_brush)
             else:
-                # Colore normale
+                # Normal color
                 normal_brush = QBrush(QColor(100, 150, 255, 180))
                 handle_item.setBrush(normal_brush)
 
@@ -198,6 +198,12 @@ class RectROIItem(QGraphicsRectItem):
         return self.model.name
 
     def _handle_centers(self):
+        """
+        Get the center positions of all resize handles.
+        
+        Returns:
+            dict: Mapping of handle keys to QPointF positions
+        """
         r = self.rect()
         cx, cy, w, h = r.left(), r.top(), r.width(), r.height()
         return {
@@ -212,6 +218,15 @@ class RectROIItem(QGraphicsRectItem):
         }
 
     def _handle_at(self, pos: QPointF):
+        """
+        Check if position is over a resize handle.
+        
+        Args:
+            pos: Position to check in local coordinates
+            
+        Returns:
+            str or None: Handle key if position is over a handle, None otherwise
+        """
         s2 = self._handle_size / 2.0
         for key, c in self._handle_centers().items():
             if QRectF(c.x()-s2, c.y()-s2, self._handle_size, self._handle_size).contains(pos):
@@ -219,19 +234,20 @@ class RectROIItem(QGraphicsRectItem):
         return None
 
     def hoverEnterEvent(self, event):
-        """Evento quando il mouse entra nell'area del ROI."""
+        """Handle mouse enter event in ROI area."""
         self._show_handles = True
         self._show_hide_handles(True)
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
-        """Evento quando il mouse esce dall'area del ROI."""
+        """Handle mouse leave event from ROI area."""
         self._show_handles = False
         self._show_hide_handles(False)
         self._hovered_handle = None
         super().hoverLeaveEvent(event)
 
     def hoverMoveEvent(self, event):
+        """Handle mouse move events within the ROI to show appropriate cursors."""
         h = self._handle_at(event.pos())
         cursors = {
             "tl": Qt.SizeFDiagCursor, "br": Qt.SizeFDiagCursor,
@@ -242,7 +258,7 @@ class RectROIItem(QGraphicsRectItem):
         }
         self.setCursor(QCursor(cursors[h]))
         
-        # Evidenzia l'handle sotto il mouse
+        # Highlight the handle under the mouse
         if h != self._hovered_handle:
             self._hovered_handle = h
             self._highlight_handle(h)
@@ -250,24 +266,36 @@ class RectROIItem(QGraphicsRectItem):
         super().hoverMoveEvent(event)
 
     def mousePressEvent(self, event):
+        """
+        Handle mouse press events for resize and move operations.
+        
+        Args:
+            event: Mouse press event containing button and position information
+        """
         if event.button() == Qt.LeftButton:
             h = self._handle_at(event.pos())
-            if h:  # start resize
+            if h:  # Start resize operation
                 self._resizing = True
                 self._resize_handle = h
                 self._orig_rect = QRectF(self.rect())
                 self._orig_pos = QPointF(self.pos())
                 self._press_parent_pos = self.mapToParent(event.pos())
                 
-                # Prepara il cambiamento di geometria per evitare scie
+                # Prepare geometry change to avoid trails
                 self.prepareGeometryChange()
                 event.accept()
                 return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        """
+        Handle mouse move events for resizing operations.
+        
+        Args:
+            event: Mouse move event containing position information
+        """
         if self._resizing and self._resize_handle:
-            # Prepara il cambiamento di geometria per evitare scie
+            # Prepare geometry change to avoid trails
             self.prepareGeometryChange()
             
             parent = self.parentItem()
@@ -281,9 +309,9 @@ class RectROIItem(QGraphicsRectItem):
 
             nx, ny, nw, nh = ox, oy, ow, oh
 
-            # Orizzontale
+            # Handle horizontal resizing
             if self._resize_handle in ("tl", "l", "bl"):
-                # spostando a sinistra: dx < 0 allarga, dx > 0 restringe
+                # Moving left: negative dx expands, positive dx shrinks
                 max_dx_left = ow - min_w
                 dx_clamped = max(-1e6, min(max_dx_left, dx))
                 nx = ox + dx_clamped
@@ -291,7 +319,7 @@ class RectROIItem(QGraphicsRectItem):
             elif self._resize_handle in ("tr", "r", "br"):
                 nw = max(min_w, ow + dx)
 
-            # Verticale
+            # Handle vertical resizing
             if self._resize_handle in ("tl", "t", "tr"):
                 max_dy_top = oh - min_h
                 dy_clamped = max(-1e6, min(max_dy_top, dy))
@@ -300,25 +328,25 @@ class RectROIItem(QGraphicsRectItem):
             elif self._resize_handle in ("bl", "b", "br"):
                 nh = max(min_h, oh + dy)
 
-            # Mantieni dentro l'immagine termica (parent)
+            # Keep within thermal image bounds (parent)
             if parent:
-                pb = parent.boundingRect()  # coordinate del parent
+                pb = parent.boundingRect()  # Parent coordinates
                 nx = max(pb.left(), min(nx, pb.right() - nw))
                 ny = max(pb.top(),  min(ny, pb.bottom() - nh))
 
-            # Applica
+            # Apply changes
             self.setPos(QPointF(nx, ny))
             self.setRect(QRectF(0, 0, nw, nh))
             self._update_label_pos()
             self._update_handle_positions()
 
-            # Sync modello live
+            # Sync model with live changes
             self.model.x = int(nx)
             self.model.y = int(ny)
             self.model.width = float(nw)
             self.model.height = float(nh)
             
-            # Forza l'aggiornamento per evitare scie
+            # Force update to avoid trails
             self.update()
             event.accept()
             return
@@ -326,22 +354,28 @@ class RectROIItem(QGraphicsRectItem):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        """
+        Handle mouse release events.
+        
+        Args:
+            event: Mouse release event containing button information
+        """
         if self._resizing and event.button() == Qt.LeftButton:
             self._resizing = False
             self._resize_handle = None
-            # Notifica ricalcolo
+            # Notify recalculation
             self._notify_model_changed()
-            # Aggiornamento finale per pulire eventuali artefatti
+            # Final update to clean any artifacts
             self.update()
             event.accept()
             return
-        # se era un semplice move, ricalcola qui
+        # If it was a simple move, recalculate here
         if event.button() == Qt.LeftButton:
             self._notify_model_changed()
         super().mouseReleaseEvent(event)
 
     def _notify_model_changed(self):
-        # aggiorna il modello e chiedi ricalcolo mirato
+        """Update the model and request targeted recalculation."""
         self.model.x = int(self.pos().x())
         self.model.y = int(self.pos().y())
         self.model.width = float(self.rect().width())
@@ -353,6 +387,12 @@ class RectROIItem(QGraphicsRectItem):
                 view._main_window.update_single_roi(self.model)
     
     def _apply_color(self, color: QColor):
+        """
+        Apply color to the ROI item.
+        
+        Args:
+            color: QColor to apply to the ROI
+        """
         pen = QPen(color, 2)
         pen.setStyle(Qt.SolidLine)
         self.setPen(pen)
@@ -361,13 +401,20 @@ class RectROIItem(QGraphicsRectItem):
         self.setBrush(QBrush(fill))
     
     def set_color(self, color: QColor):
+        """
+        Set the color of the ROI item.
+        
+        Args:
+            color: New color for the ROI
+        """
         self._color = color
         setattr(self.model, "color", color)
         self._apply_color(color)
     
     def refresh_label(self):
+        """Refresh the label text with current statistics."""
         m = self.model
-        # Recupera le impostazioni dalla MainWindow
+        # Retrieve settings from MainWindow
         settings = {
             "name": True, "emissivity": True, "min": True, "max": True, "avg": True, "median": False
         }
@@ -386,8 +433,8 @@ class RectROIItem(QGraphicsRectItem):
         parts2 = []
         if settings.get("min", True): parts2.append(f"min {fmt(getattr(m, 'temp_min', None))}")
         if settings.get("max", True): parts2.append(f"max {fmt(getattr(m, 'temp_max', None))}")
-        if settings.get("avg", True): parts2.append(f"avg {fmt(getattr(m, 'temp_mean', None))}")
-        if settings.get("median", False): parts2.append(f"med {fmt(getattr(m, 'temp_median', None))}")
+        if settings.get("avg", True): parts2.append(f"mean {fmt(getattr(m, 'temp_mean', None))}")
+        if settings.get("median", False): parts2.append(f"median {fmt(getattr(m, 'temp_median', None))}")
         line2 = " | ".join(parts2)
 
         text = line1 if line2 == "" else f"{line1}\n{line2}"
@@ -395,7 +442,7 @@ class RectROIItem(QGraphicsRectItem):
         self._update_label_pos()
     
     def _update_label_pos(self):
-        # angolo alto-sinistra del rettangolo con piccolo offset
+        """Update label position to top-left corner of rectangle with small offset."""
         self.label.setPos(self.rect().left() + 2, self.rect().top() - self.label.boundingRect().height() - 2)
 
 
@@ -430,23 +477,23 @@ class SpotROIItem(QGraphicsEllipseItem):
         
         # Set visual appearance
         self._setup_appearance()
-        self.setZValue(10)  # ROI sempre sopra le immagini
+        self.setZValue(10)  # ROI always above images
         self.setAcceptHoverEvents(True)
         self._resizing = False
-        self._handle_size = 8  # px
+        self._handle_size = 8  # pixels
         self.setPos(model.x, model.y)
         self._press_parent_pos = QPointF()
         
-        # Feedback visivo migliorato
+        # Enhanced visual feedback
         self._show_handles = False
         self._hovered_handle = None
-        self._handle_items = {}  # Dizionario degli handle visibili
+        self._handle_items = {}  # Dictionary of visible handles
         
-        # Colore iniziale (dal modello se presente)
+        # Initial color (from model if present)
         self._color = getattr(self.model, "color", QColor(255, 165, 0))
         self._apply_color(self._color)
         
-        # Label: nome + statistiche; non scala con lo zoom
+        # Label: name + statistics; does not scale with zoom
         self.label = QGraphicsTextItem("", self)
         self.label.setDefaultTextColor(Qt.white)
         self.label.setZValue(self.zValue() + 1)
@@ -467,13 +514,13 @@ class SpotROIItem(QGraphicsEllipseItem):
         self.setBrush(brush)
     
     def _create_handle_items(self):
-        """Crea gli handle visibili per il ridimensionamento."""
+        """Create visible handles for resizing."""
         if self._handle_items:
-            return  # Già creati
+            return  # Already created
         
         handle_positions = self._get_resize_handles()
         for handle_key, center in handle_positions.items():
-            # Crea un piccolo cerchio per l'handle
+            # Create a small circle for the handle
             handle_ellipse = QGraphicsEllipseItem(
                 center.x() - self._handle_size/2, 
                 center.y() - self._handle_size/2,
@@ -482,18 +529,18 @@ class SpotROIItem(QGraphicsEllipseItem):
                 self
             )
             
-            # Stile dell'handle
+            # Handle style
             handle_pen = QPen(QColor(255, 255, 255), 1)
-            handle_brush = QBrush(QColor(100, 150, 255, 180))  # Blu semi-trasparente
+            handle_brush = QBrush(QColor(100, 150, 255, 180))  # Semi-transparent blue
             handle_ellipse.setPen(handle_pen)
             handle_ellipse.setBrush(handle_brush)
             handle_ellipse.setZValue(self.zValue() + 2)
-            handle_ellipse.hide()  # Nascosto per default
+            handle_ellipse.hide()  # Hidden by default
             
             self._handle_items[handle_key] = handle_ellipse
     
     def _update_handle_positions(self):
-        """Aggiorna le posizioni degli handle."""
+        """Update handle positions."""
         if not self._handle_items:
             return
             
@@ -509,7 +556,7 @@ class SpotROIItem(QGraphicsEllipseItem):
                 )
     
     def _show_hide_handles(self, show: bool):
-        """Mostra o nasconde gli handle."""
+        """Show or hide handles."""
         if show and not self._handle_items:
             self._create_handle_items()
         
@@ -518,17 +565,17 @@ class SpotROIItem(QGraphicsEllipseItem):
                 handle_item.setVisible(show)
     
     def _highlight_handle(self, handle_key: str = None):
-        """Evidenzia un handle specifico o rimuove l'evidenziazione."""
+        """Highlight a specific handle or remove highlighting."""
         if not self._handle_items:
             return
             
         for key, handle_item in self._handle_items.items():
             if key == handle_key:
-                # Evidenzia questo handle
-                highlight_brush = QBrush(QColor(255, 150, 0, 220))  # Arancione vivace
+                # Highlight this handle
+                highlight_brush = QBrush(QColor(255, 150, 0, 220))  # Bright orange
                 handle_item.setBrush(highlight_brush)
             else:
-                # Colore normale
+                # Normal color
                 normal_brush = QBrush(QColor(100, 150, 255, 180))
                 handle_item.setBrush(normal_brush)
 
@@ -585,7 +632,12 @@ class SpotROIItem(QGraphicsEllipseItem):
         return self.model.name
 
     def _get_resize_handles(self):
-        """Get the positions of resize handles for the circle."""
+        """
+        Get the positions of resize handles for the circle.
+        
+        Returns:
+            dict: Mapping of handle keys to QPointF positions
+        """
         r = self.model.radius
         return {
             "right": QPointF(r, 0),
@@ -595,7 +647,15 @@ class SpotROIItem(QGraphicsEllipseItem):
         }
 
     def _handle_at(self, pos: QPointF):
-        """Check if position is near a resize handle."""
+        """
+        Check if position is near a resize handle.
+        
+        Args:
+            pos: Position to check in local coordinates
+            
+        Returns:
+            str or None: Handle key if position is over a handle, None otherwise
+        """
         s2 = self._handle_size / 2.0
         for key, handle_pos in self._get_resize_handles().items():
             if QRectF(handle_pos.x()-s2, handle_pos.y()-s2, self._handle_size, self._handle_size).contains(pos):
@@ -603,13 +663,13 @@ class SpotROIItem(QGraphicsEllipseItem):
         return None
 
     def hoverEnterEvent(self, event):
-        """Evento quando il mouse entra nell'area del ROI."""
+        """Handle mouse enter event in ROI area."""
         self._show_handles = True
         self._show_hide_handles(True)
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
-        """Evento quando il mouse esce dall'area del ROI."""
+        """Handle mouse leave event from ROI area."""
         self._show_handles = False
         self._show_hide_handles(False)
         self._hovered_handle = None
@@ -627,7 +687,7 @@ class SpotROIItem(QGraphicsEllipseItem):
         }
         self.setCursor(QCursor(cursors[h]))
         
-        # Evidenzia l'handle sotto il mouse
+        # Highlight the handle under the mouse
         if h != self._hovered_handle:
             self._hovered_handle = h
             self._highlight_handle(h)
@@ -635,25 +695,35 @@ class SpotROIItem(QGraphicsEllipseItem):
         super().hoverMoveEvent(event)
 
     def mousePressEvent(self, event):
-        """Handle mouse press events for resize and move operations."""
+        """
+        Handle mouse press events for resize and move operations.
+        
+        Args:
+            event: Mouse press event containing button and position information
+        """
         if event.button() == Qt.LeftButton:
             h = self._handle_at(event.pos())
-            if h:  # start resize
+            if h:  # Start resize operation
                 self._resizing = True
                 self._resize_handle = h
                 self._orig_radius = self.model.radius
                 self._press_parent_pos = self.mapToParent(event.pos())
                 
-                # Prepara il cambiamento di geometria per evitare scie
+                # Prepare geometry change to avoid trails
                 self.prepareGeometryChange()
                 event.accept()
                 return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        """Handle mouse move events for resizing the circle."""
+        """
+        Handle mouse move events for resizing the circle.
+        
+        Args:
+            event: Mouse move event containing position information
+        """
         if self._resizing and self._resize_handle:
-            # Prepara il cambiamento di geometria per evitare scie
+            # Prepare geometry change to avoid trails
             self.prepareGeometryChange()
             
             cur_parent = self.mapToParent(event.pos())
@@ -665,16 +735,16 @@ class SpotROIItem(QGraphicsEllipseItem):
 
             # Calculate new radius based on handle direction and movement
             if self._resize_handle == "right":
-                # Trascinando verso destra aumenta, verso sinistra diminuisce
+                # Dragging right increases, left decreases
                 new_radius = max(min_radius, self._orig_radius + dx)
             elif self._resize_handle == "left":
-                # Trascinando verso sinistra aumenta, verso destra diminuisce
+                # Dragging left increases, right decreases
                 new_radius = max(min_radius, self._orig_radius - dx)
             elif self._resize_handle == "bottom":
-                # Trascinando verso il basso aumenta, verso l'alto diminuisce
+                # Dragging down increases, up decreases
                 new_radius = max(min_radius, self._orig_radius + dy)
             elif self._resize_handle == "top":
-                # Trascinando verso l'alto aumenta, verso il basso diminuisce
+                # Dragging up increases, down decreases
                 new_radius = max(min_radius, self._orig_radius - dy)
 
             # Update the circle
@@ -686,7 +756,7 @@ class SpotROIItem(QGraphicsEllipseItem):
             # Sync model
             self.model.radius = float(new_radius)
             
-            # Forza l'aggiornamento per evitare scie
+            # Force update to avoid trails
             self.update()
             event.accept()
             return
@@ -694,17 +764,22 @@ class SpotROIItem(QGraphicsEllipseItem):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        """Handle mouse release events."""
+        """
+        Handle mouse release events.
+        
+        Args:
+            event: Mouse release event containing button information
+        """
         if self._resizing and event.button() == Qt.LeftButton:
             self._resizing = False
             self._resize_handle = None
             # Notify model changed
             self._notify_model_changed()
-            # Aggiornamento finale per pulire eventuali artefatti
+            # Final update to clean any artifacts
             self.update()
             event.accept()
             return
-        # se era un semplice move, ricalcola qui
+        # If it was a simple move, recalculate here
         if event.button() == Qt.LeftButton:
             self._notify_model_changed()
         super().mouseReleaseEvent(event)
@@ -723,7 +798,12 @@ class SpotROIItem(QGraphicsEllipseItem):
                 view._main_window.update_single_roi(self.model)
     
     def _apply_color(self, color: QColor):
-        """Apply color to the spot ROI."""
+        """
+        Apply color to the spot ROI.
+        
+        Args:
+            color: QColor to apply to the ROI
+        """
         pen = QPen(color, 2)
         pen.setStyle(Qt.SolidLine)
         self.setPen(pen)
@@ -732,7 +812,12 @@ class SpotROIItem(QGraphicsEllipseItem):
         self.setBrush(QBrush(fill))
     
     def set_color(self, color: QColor):
-        """Set the color of the spot ROI."""
+        """
+        Set the color of the spot ROI.
+        
+        Args:
+            color: New color for the ROI
+        """
         self._color = color
         setattr(self.model, "color", color)
         self._apply_color(color)
@@ -740,7 +825,7 @@ class SpotROIItem(QGraphicsEllipseItem):
     def refresh_label(self):
         """Refresh the label text with current statistics."""
         m = self.model
-        # Recupera le impostazioni dalla MainWindow
+        # Retrieve settings from MainWindow
         settings = {
             "name": True, "emissivity": True, "min": True, "max": True, "avg": True, "median": False
         }
@@ -759,8 +844,8 @@ class SpotROIItem(QGraphicsEllipseItem):
         parts2 = []
         if settings.get("min", True): parts2.append(f"min {fmt(getattr(m, 'temp_min', None))}")
         if settings.get("max", True): parts2.append(f"max {fmt(getattr(m, 'temp_max', None))}")
-        if settings.get("avg", True): parts2.append(f"avg {fmt(getattr(m, 'temp_mean', None))}")
-        if settings.get("median", False): parts2.append(f"med {fmt(getattr(m, 'temp_median', None))}")
+        if settings.get("avg", True): parts2.append(f"mean {fmt(getattr(m, 'temp_mean', None))}")
+        if settings.get("median", False): parts2.append(f"median {fmt(getattr(m, 'temp_median', None))}")
         line2 = " | ".join(parts2)
 
         text = line1 if line2 == "" else f"{line1}\n{line2}"
@@ -810,24 +895,24 @@ class PolygonROIItem(QGraphicsPolygonItem):
         
         # Set visual appearance
         self._setup_appearance()
-        self.setZValue(10)  # ROI sempre sopra le immagini
+        self.setZValue(10)  # ROI always above images
         self.setAcceptHoverEvents(True)
         
         # Editing state
         self._editing_vertices = False
         self._selected_vertex = -1
-        self._vertex_radius = 5  # Raggio dei cerchietti per i vertici
+        self._vertex_radius = 5  # Radius of vertex circles
         
-        # Feedback visivo migliorato
+        # Enhanced visual feedback
         self._show_vertices = False
         self._hovered_vertex = -1
-        self._vertex_items = []  # Lista degli handle visibili per i vertici
+        self._vertex_items = []  # List of visible vertex handles
         
-        # Colore iniziale (dal modello se presente)
+        # Initial color (from model if present)
         self._color = getattr(self.model, "color", QColor(255, 165, 0))
         self._apply_color(self._color)
         
-        # Label: nome + statistiche; non scala con lo zoom
+        # Label: name + statistics; does not scale with zoom
         self.label = QGraphicsTextItem("", self)
         self.label.setDefaultTextColor(Qt.white)
         self.label.setZValue(self.zValue() + 1)
@@ -848,8 +933,8 @@ class PolygonROIItem(QGraphicsPolygonItem):
         self.setBrush(brush)
     
     def _create_vertex_items(self):
-        """Crea gli handle visibili per i vertici."""
-        # Rimuovi i vecchi handle se esistono
+        """Create visible handles for vertices."""
+        # Remove old handles if they exist
         for vertex_item in self._vertex_items:
             if vertex_item.scene():
                 vertex_item.scene().removeItem(vertex_item)
@@ -858,7 +943,7 @@ class PolygonROIItem(QGraphicsPolygonItem):
         polygon = self.polygon()
         for i in range(polygon.size()):
             vertex = polygon[i]
-            # Crea un piccolo cerchio per il vertice
+            # Create a small circle for the vertex
             vertex_ellipse = QGraphicsEllipseItem(
                 vertex.x() - self._vertex_radius, 
                 vertex.y() - self._vertex_radius,
@@ -867,18 +952,18 @@ class PolygonROIItem(QGraphicsPolygonItem):
                 self
             )
             
-            # Stile del vertice
+            # Vertex style
             vertex_pen = QPen(QColor(255, 255, 255), 1)
-            vertex_brush = QBrush(QColor(100, 150, 255, 180))  # Blu semi-trasparente
+            vertex_brush = QBrush(QColor(100, 150, 255, 180))  # Semi-transparent blue
             vertex_ellipse.setPen(vertex_pen)
             vertex_ellipse.setBrush(vertex_brush)
             vertex_ellipse.setZValue(self.zValue() + 2)
-            vertex_ellipse.hide()  # Nascosto per default
+            vertex_ellipse.hide()  # Hidden by default
             
             self._vertex_items.append(vertex_ellipse)
     
     def _update_vertex_positions(self):
-        """Aggiorna le posizioni dei vertici."""
+        """Update vertex positions."""
         polygon = self.polygon()
         for i, vertex_item in enumerate(self._vertex_items):
             if i < polygon.size():
@@ -891,7 +976,7 @@ class PolygonROIItem(QGraphicsPolygonItem):
                 )
     
     def _show_hide_vertices(self, show: bool):
-        """Mostra o nasconde i vertici."""
+        """Show or hide vertices."""
         if show:
             self._create_vertex_items()
         
@@ -899,19 +984,28 @@ class PolygonROIItem(QGraphicsPolygonItem):
             vertex_item.setVisible(show)
     
     def _highlight_vertex(self, vertex_idx: int = -1):
-        """Evidenzia un vertice specifico o rimuove l'evidenziazione."""
+        """Highlight a specific vertex or remove highlighting."""
         for i, vertex_item in enumerate(self._vertex_items):
             if i == vertex_idx:
-                # Evidenzia questo vertice
-                highlight_brush = QBrush(QColor(255, 150, 0, 220))  # Arancione vivace
+                # Highlight this vertex
+                highlight_brush = QBrush(QColor(255, 150, 0, 220))  # Bright orange
                 vertex_item.setBrush(highlight_brush)
             else:
-                # Colore normale
+                # Normal color
                 normal_brush = QBrush(QColor(100, 150, 255, 180))
                 vertex_item.setBrush(normal_brush)
 
     def itemChange(self, change, value):
-        """Handle item changes, specifically position changes to sync with model."""
+        """
+        Handle item changes, specifically position changes to sync with model.
+        
+        Args:
+            change: Type of change (QGraphicsItem.GraphicsItemChange)
+            value: New value associated with the change
+            
+        Returns:
+            The processed value (usually unchanged)
+        """
         if change == QGraphicsItem.ItemPositionHasChanged:
             # Update the model coordinates when the item is moved
             offset = value
@@ -935,15 +1029,33 @@ class PolygonROIItem(QGraphicsPolygonItem):
         self._update_vertex_positions()
     
     def get_model_id(self):
-        """Get the unique ID of the associated model."""
+        """
+        Get the unique ID of the associated model.
+        
+        Returns:
+            UUID: The unique identifier of the ROI model
+        """
         return self.model.id
     
     def get_model_name(self):
-        """Get the name of the associated model."""
+        """
+        Get the name of the associated model.
+        
+        Returns:
+            str: The name of the ROI model
+        """
         return self.model.name
 
     def _get_vertex_at(self, pos: QPointF):
-        """Check if position is near a vertex."""
+        """
+        Check if position is near a vertex.
+        
+        Args:
+            pos: Position to check in local coordinates
+            
+        Returns:
+            int: Vertex index if position is near a vertex, -1 otherwise
+        """
         polygon = self.polygon()
         for i in range(polygon.size()):
             vertex = polygon[i]
@@ -953,13 +1065,13 @@ class PolygonROIItem(QGraphicsPolygonItem):
         return -1
 
     def hoverEnterEvent(self, event):
-        """Evento quando il mouse entra nell'area del ROI."""
+        """Handle mouse enter event in ROI area."""
         self._show_vertices = True
         self._show_hide_vertices(True)
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
-        """Evento quando il mouse esce dall'area del ROI."""
+        """Handle mouse leave event from ROI area."""
         self._show_vertices = False
         self._show_hide_vertices(False)
         self._hovered_vertex = -1
@@ -973,7 +1085,7 @@ class PolygonROIItem(QGraphicsPolygonItem):
         else:
             self.setCursor(QCursor(Qt.ArrowCursor))
         
-        # Evidenzia il vertice sotto il mouse
+        # Highlight the vertex under the mouse
         if vertex_idx != self._hovered_vertex:
             self._hovered_vertex = vertex_idx
             self._highlight_vertex(vertex_idx)
@@ -981,7 +1093,12 @@ class PolygonROIItem(QGraphicsPolygonItem):
         super().hoverMoveEvent(event)
 
     def mousePressEvent(self, event):
-        """Handle mouse press events for vertex editing and move operations."""
+        """
+        Handle mouse press events for vertex editing and move operations.
+        
+        Args:
+            event: Mouse press event containing button and position information
+        """
         if event.button() == Qt.LeftButton:
             vertex_idx = self._get_vertex_at(event.pos())
             if vertex_idx >= 0:
@@ -989,7 +1106,7 @@ class PolygonROIItem(QGraphicsPolygonItem):
                 self._editing_vertices = True
                 self._selected_vertex = vertex_idx
                 
-                # Prepara il cambiamento di geometria per evitare scie
+                # Prepare geometry change to avoid trails
                 self.prepareGeometryChange()
                 event.accept()
                 return
@@ -997,9 +1114,14 @@ class PolygonROIItem(QGraphicsPolygonItem):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        """Handle mouse move events for vertex editing."""
+        """
+        Handle mouse move events for vertex editing.
+        
+        Args:
+            event: Mouse move event containing position information
+        """
         if self._editing_vertices and self._selected_vertex >= 0:
-            # Prepara il cambiamento di geometria per evitare scie
+            # Prepare geometry change to avoid trails
             self.prepareGeometryChange()
             
             # Update the vertex position
@@ -1012,7 +1134,7 @@ class PolygonROIItem(QGraphicsPolygonItem):
             self._update_label_pos()
             self._update_vertex_positions()
             
-            # Forza l'aggiornamento per evitare scie
+            # Force update to avoid trails
             self.update()
             event.accept()
             return
@@ -1020,18 +1142,23 @@ class PolygonROIItem(QGraphicsPolygonItem):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        """Handle mouse release events."""
+        """
+        Handle mouse release events.
+        
+        Args:
+            event: Mouse release event containing button information
+        """
         if self._editing_vertices and event.button() == Qt.LeftButton:
             self._editing_vertices = False
             self._selected_vertex = -1
             # Notify model changed
             self._notify_model_changed()
-            # Aggiornamento finale per pulire eventuali artefatti
+            # Final update to clean any artifacts
             self.update()
             event.accept()
             return
         
-        # se era un semplice move, ricalcola qui
+        # If it was a simple move, recalculate here
         if event.button() == Qt.LeftButton:
             self._notify_model_changed()
         super().mouseReleaseEvent(event)
@@ -1046,7 +1173,12 @@ class PolygonROIItem(QGraphicsPolygonItem):
                 view._main_window.update_single_roi(self.model)
     
     def _apply_color(self, color: QColor):
-        """Apply color to the polygon ROI."""
+        """
+        Apply color to the polygon ROI.
+        
+        Args:
+            color: QColor to apply to the ROI
+        """
         pen = QPen(color, 2)
         pen.setStyle(Qt.SolidLine)
         self.setPen(pen)
@@ -1055,7 +1187,12 @@ class PolygonROIItem(QGraphicsPolygonItem):
         self.setBrush(QBrush(fill))
     
     def set_color(self, color: QColor):
-        """Set the color of the polygon ROI."""
+        """
+        Set the color of the polygon ROI.
+        
+        Args:
+            color: New color for the ROI
+        """
         self._color = color
         setattr(self.model, "color", color)
         self._apply_color(color)
@@ -1063,7 +1200,7 @@ class PolygonROIItem(QGraphicsPolygonItem):
     def refresh_label(self):
         """Refresh the label text with current statistics."""
         m = self.model
-        # Recupera le impostazioni dalla MainWindow
+        # Retrieve settings from MainWindow
         settings = {
             "name": True, "emissivity": True, "min": True, "max": True, "avg": True, "median": False
         }
@@ -1082,8 +1219,8 @@ class PolygonROIItem(QGraphicsPolygonItem):
         parts2 = []
         if settings.get("min", True): parts2.append(f"min {fmt(getattr(m, 'temp_min', None))}")
         if settings.get("max", True): parts2.append(f"max {fmt(getattr(m, 'temp_max', None))}")
-        if settings.get("avg", True): parts2.append(f"avg {fmt(getattr(m, 'temp_mean', None))}")
-        if settings.get("median", False): parts2.append(f"med {fmt(getattr(m, 'temp_median', None))}")
+        if settings.get("avg", True): parts2.append(f"mean {fmt(getattr(m, 'temp_mean', None))}")
+        if settings.get("median", False): parts2.append(f"median {fmt(getattr(m, 'temp_median', None))}")
         line2 = " | ".join(parts2)
 
         text = line1 if line2 == "" else f"{line1}\n{line2}"
