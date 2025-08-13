@@ -1,8 +1,8 @@
 from typing import Optional
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QStyleOptionGraphicsItem, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem, QGraphicsPolygonItem
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QStyleOptionGraphicsItem, QGraphicsPolygonItem
 from PySide6.QtCore import Qt, QPointF, Signal, QRectF
 from PySide6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QTransform, QPen, QBrush, QColor, QPolygonF
-import uuid
+
 
 
 class BlendablePixmapItem(QGraphicsPixmapItem):

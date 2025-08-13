@@ -1,0 +1,80 @@
+{
+  "version": "1.0",
+  "thermal_parameters": {
+    "Emissivity": 0.6,
+    "AtmosphericTemperature": 20.0,
+    "AtmosphericTransmission": 0.95,
+    "RelativeHumidity": 0.5
+  },
+  "rois": [
+    {
+      "type": "SpotROI",
+      "name": "Spot_1",
+      "emissivity": 0.6,
+      "x": 37.01762948790534,
+      "y": 222.10603723733104,
+      "radius": 10.0
+    },
+    {
+      "type": "SpotROI",
+      "name": "Spot_3",
+      "emissivity": 0.95,
+      "x": 126.6490957484886,
+      "y": 156.84790743379995,
+      "radius": 10.0
+    },
+    {
+      "type": "RectROI",
+      "name": "ROI_4",
+      "emissivity": 0.95,
+      "x": 46,
+      "y": 95,
+      "width": 22.710997442455238,
+      "height": 17.800511508951402
+    },
+    {
+      "type": "PolygonROI",
+      "name": "Polygon_5",
+      "emissivity": 0.95,
+      "points": [
+        [
+          204.19437340153453,
+          204.0920716112532
+        ],
+        [
+          270.48593350383635,
+          204.70588235294116
+        ],
+        [
+          264.3478260869565,
+          168.4910485933504
+        ],
+        [
+          206.03580562659846,
+          169.71867007672634
+        ],
+        [
+          204.19437340153453,
+          204.0920716112532
+        ]
+      ]
+    },
+    {
+      "type": "SpotROI",
+      "name": "Spot_5",
+      "emissivity": 0.95,
+      "x": 234.2710997442455,
+      "y": 89.923273657289,
+      "radius": 10.0
+    }
+  ],
+  "palette": "Cividis",
+  "palette_inverted": false,
+  "overlay_settings": {
+    "scale": 0.737,
+    "offset_x": -10,
+    "offset_y": -21,
+    "opacity": 100,
+    "blend_mode": "Normal"
+  }
+}

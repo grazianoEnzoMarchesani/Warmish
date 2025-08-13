@@ -5,7 +5,7 @@ This module contains QGraphicsItem-based classes for visually representing
 ROIs (Regions of Interest) in a QGraphicsScene.
 """
 
-from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem, QGraphicsTextItem, QCheckBox, QHBoxLayout, QLabel, QGraphicsEllipseItem, QGraphicsPolygonItem
+from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsItem, QGraphicsTextItem, QGraphicsEllipseItem, QGraphicsPolygonItem
 from PySide6.QtGui import QPen, QBrush, QColor, QCursor, QPolygonF
 from PySide6.QtCore import Qt, QRectF, QPointF
 from analysis.roi_models import RectROI, SpotROI, PolygonROI

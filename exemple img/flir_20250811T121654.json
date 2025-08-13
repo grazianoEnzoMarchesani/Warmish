@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "thermal_parameters": {
+    "Emissivity": 0.9,
+    "AtmosphericTemperature": 20.0,
+    "AtmosphericTransmission": 0.95,
+    "RelativeHumidity": 0.5
+  },
+  "rois": [
+    {
+      "type": "RectROI",
+      "name": "ROI_1",
+      "emissivity": 0.95,
+      "x": 248,
+      "y": 109,
+      "width": 190.28132992327363,
+      "height": 448.0818414322251
+    }
+  ],
+  "palette": "Cividis",
+  "palette_inverted": false,
+  "overlay_settings": {
+    "scale": 0.731,
+    "offset_x": -112,
+    "offset_y": -42,
+    "opacity": 50,
+    "blend_mode": "Normal"
+  }
+}

@@ -1,7 +1,6 @@
-import sys
 import json
 import io
-import os  # AGGIUNGO QUESTO IMPORT
+import os
 import subprocess
 import exiftool
 import numpy as np
@@ -10,13 +9,13 @@ import matplotlib.cm as cm
 
 from PySide6.QtWidgets import (
     QMainWindow, QLabel, QVBoxLayout, QHBoxLayout, QWidget,
-    QFileDialog, QMessageBox, QTextEdit, QSizePolicy, QLineEdit, QFormLayout,
+    QFileDialog, QMessageBox, QTextEdit, QLineEdit, QFormLayout,
     QGroupBox, QTabWidget, QToolBar, QComboBox, QSizePolicy as QSP,
-    QCheckBox, QPushButton, QSlider, QDoubleSpinBox, QSpinBox, QListWidget, QListWidgetItem,
+    QCheckBox, QPushButton, QSlider, QDoubleSpinBox, QSpinBox,
     QTableWidget, QTableWidgetItem, QHeaderView
 )
-from PySide6.QtGui import QAction, QPixmap, QImage, QIcon, QColor, QPen, QFontMetrics, QPainter, QCursor
-from PySide6.QtCore import Qt, QRect, QPointF, QRectF, QSignalBlocker
+from PySide6.QtGui import QAction, QPixmap, QImage, QIcon, QPainter
+from PySide6.QtCore import Qt, QPointF, QSignalBlocker
 
 from constants import PALETTE_MAP
 from .widgets.color_bar_legend import ColorBarLegend
@@ -37,8 +36,6 @@ class ThermalAnalyzerNG(QMainWindow):
         self.action_open = QAction(QIcon(), "Carica Immagine", self)
         self.action_open.triggered.connect(self.open_image)
         self.toolbar.addAction(self.action_open)
-        self.action_save = QAction(QIcon(), "Salva", self)
-        self.toolbar.addAction(self.action_save)  # TODO: implementa salvataggio
         self.action_export = QAction(QIcon(), "Esporta", self)
         self.toolbar.addAction(self.action_export)  # TODO: implementa esportazione
         self.toolbar.addSeparator()
@@ -1137,7 +1134,7 @@ class ThermalAnalyzerNG(QMainWindow):
             self.display_images()
 
     def on_reset_alignment(self):
-        # Ripristina valori letti dai metadati (se presenti)
+        # Reset values read from metadata (if present)
         self.overlay_scale = float(self.meta_overlay_scale)
         self.overlay_offset_x = float(self.meta_offset_x)
         self.overlay_offset_y = float(self.meta_offset_y)
