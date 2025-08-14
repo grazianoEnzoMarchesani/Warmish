@@ -8,8 +8,8 @@
     "ObjectDistance": 3.0,
     "ReflectedApparentTemperature": 24.999994
   },
-  "palette": "Magma",
-  "palette_inverted": false,
+  "palette": "RdBu",
+  "palette_inverted": true,
   "overlay_settings": {
     "scale": 0.731,
     "offset_x": -112,
@@ -30,8 +30,8 @@
       "type": "RectROI",
       "name": "ciao",
       "emissivity": 0.9,
-      "x": 343,
-      "y": 190,
+      "x": 322.0,
+      "y": 186.0,
       "width": 106.7502692191602,
       "height": 150.87869608880857
     },

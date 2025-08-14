@@ -1,26 +1,26 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.98,
+    "Emissivity": 0.9,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5,
     "ObjectDistance": 3.469,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "Sepia",
+  "palette": "Spectral",
   "palette_inverted": false,
   "overlay_settings": {
     "scale": 0.7371037717330103,
     "offset_x": -10,
     "offset_y": -21,
     "opacity": 100,
-    "blend_mode": "Normal"
+    "blend_mode": "Overlay"
   },
   "roi_label_settings": {
     "name": true,
     "emissivity": true,
-    "min": true,
+    "min": false,
     "max": true,
     "avg": true,
     "median": false
@@ -28,47 +28,56 @@
   "rois": [
     {
       "type": "SpotROI",
-      "name": "Spot_1",
+      "name": "a",
       "emissivity": 0.95,
-      "x": 88.55862889575245,
-      "y": 166.35294679509883,
-      "radius": 63.499102729386166
+      "x": 42.12811118458076,
+      "y": 202.32024924741495,
+      "radius": 26.87784932339163
     },
     {
       "type": "RectROI",
-      "name": "ROI_1",
+      "name": "s",
       "emissivity": 0.95,
-      "x": 157,
-      "y": 133,
+      "x": 125,
+      "y": 166,
       "width": 35.96730245231606,
       "height": 69.97275204359673
     },
     {
       "type": "PolygonROI",
-      "name": "Polygon_2",
+      "name": "d",
       "emissivity": 0.95,
       "points": [
         [
-          294.71389645776566,
-          106.26702997275206
+          93.29700272479565,
+          89.91825613079018
         ],
         [
-          256.1307901907356,
-          84.03269754768397
+          139.7275204359672,
+          44.795640326975516
         ],
         [
-          220.16348773841958,
-          99.72752043596732
+          50.136239782016304,
+          62.45231607629427
         ],
         [
-          211.66212534059943,
-          203.0517711171662
+          95.25885558583104,
+          163.81471389645776
         ],
         [
-          294.71389645776566,
-          106.26702997275206
+          178.31062670299727,
+          67.0299727520436
         ]
       ]
+    },
+    {
+      "type": "RectROI",
+      "name": "f",
+      "emissivity": 0.95,
+      "x": 246.0,
+      "y": 170.0,
+      "width": 39.23705722070844,
+      "height": 41.85286103542235
     }
   ]
 }

@@ -2148,11 +2148,407 @@ class ThermalAnalyzerNG(QMainWindow):
                 self.toolbar_overlay_action.setChecked(checked) if hasattr(self, 'toolbar_overlay_action') else None
             ])
         
+        # Connect export button
+        self.btn_export_current.clicked.connect(self.export_current_analysis)
+        
         # Connect auto-save signals
         self.connect_auto_save_signals()
         
         # Make secondary view visible by default
         self.secondary_image_view.setVisible(True)
+
+    def export_current_analysis(self):
+        """
+        Export current thermal analysis including images and data.
+        
+        This method opens a file dialog to let the user choose a base filename,
+        then exports all analysis data including thermal images, visible image,
+        overlay composition, and statistical data in CSV format.
+        """
+        if not hasattr(self, 'thermal_engine') or self.thermal_engine.thermal_data is None:
+            QMessageBox.warning(self, "No Data", 
+                              "No thermal image loaded. Please load an image first.")
+            return
+        
+        # Open file dialog to get base filename
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Export Analysis", 
+            "", 
+            "Base filename (no extension) (*)"
+        )
+        
+        if not file_path:
+            return  # User cancelled
+        
+        # Remove extension if user provided one
+        import os
+        base_path = os.path.splitext(file_path)[0]
+        
+        try:
+            # Progress tracking - now 6 steps instead of 4
+            total_steps = 6
+            current_step = 0
+            
+            # Create progress message box
+            progress_msg = QMessageBox(self)
+            progress_msg.setWindowTitle("Exporting Analysis")
+            progress_msg.setText("Preparing export...")
+            progress_msg.setStandardButtons(QMessageBox.NoButton)
+            progress_msg.show()
+            QApplication.processEvents()
+            
+            exported_files = []
+            
+            # 1. Export thermal image (clean, without ROIs)
+            current_step += 1
+            progress_msg.setText(f"Exporting thermal image... ({current_step}/{total_steps})")
+            QApplication.processEvents()
+            
+            thermal_path = f"{base_path}_thermal.png"
+            if self._export_thermal_image(thermal_path):
+                exported_files.append(thermal_path)
+                print(f"✅ Exported thermal image: {thermal_path}")
+            
+            # 2. Export thermal image with ROIs
+            current_step += 1
+            progress_msg.setText(f"Exporting thermal image with ROIs... ({current_step}/{total_steps})")
+            QApplication.processEvents()
+            
+            thermal_roi_path = f"{base_path}_thermal_with_rois.png"
+            if self._export_thermal_with_rois(thermal_roi_path):
+                exported_files.append(thermal_roi_path)
+                print(f"✅ Exported thermal image with ROIs: {thermal_roi_path}")
+            
+            # 3. Export visible image (if available)
+            current_step += 1
+            progress_msg.setText(f"Exporting visible image... ({current_step}/{total_steps})")
+            QApplication.processEvents()
+            
+            visible_path = f"{base_path}_visible.png"
+            if self._export_visible_image(visible_path):
+                exported_files.append(visible_path)
+                print(f"✅ Exported visible image: {visible_path}")
+            
+            # 4. Export overlay image (always try to create overlay if visible image exists)
+            current_step += 1
+            progress_msg.setText(f"Exporting overlay composition... ({current_step}/{total_steps})")
+            QApplication.processEvents()
+            
+            overlay_path = f"{base_path}_overlay.png"
+            if self._export_overlay_image(overlay_path):
+                exported_files.append(overlay_path)
+                print(f"✅ Exported overlay image: {overlay_path}")
+            
+            # 5. Export scene composition (current view as-is)
+            current_step += 1
+            progress_msg.setText(f"Exporting current view... ({current_step}/{total_steps})")
+            QApplication.processEvents()
+            
+            scene_path = f"{base_path}_current_view.png"
+            if self._export_current_scene(scene_path):
+                exported_files.append(scene_path)
+                print(f"✅ Exported current scene: {scene_path}")
+            
+            # 6. Export data CSV
+            current_step += 1
+            progress_msg.setText(f"Exporting analysis data... ({current_step}/{total_steps})")
+            QApplication.processEvents()
+            
+            csv_path = f"{base_path}_data.csv"
+            if self._export_analysis_csv(csv_path):
+                exported_files.append(csv_path)
+                print(f"✅ Exported analysis data: {csv_path}")
+            
+            # Close progress dialog
+            progress_msg.close()
+            
+            # Show success message
+            if exported_files:
+                file_list = "\n".join([f"• {os.path.basename(f)}" for f in exported_files])
+                QMessageBox.information(
+                    self, 
+                    "Export Completed", 
+                    f"Analysis exported successfully!\n\nFiles created:\n{file_list}"
+                )
+            else:
+                QMessageBox.warning(
+                    self, 
+                    "Export Failed", 
+                    "No files were exported. Please check the data and try again."
+                )
+                
+        except Exception as e:
+            if 'progress_msg' in locals():
+                progress_msg.close()
+            QMessageBox.critical(
+                self, 
+                "Export Error", 
+                f"An error occurred during export:\n{str(e)}"
+            )
+            print(f"Export error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _export_thermal_image(self, file_path: str) -> bool:
+        """
+        Export the current thermal image with applied palette and settings.
+        
+        Args:
+            file_path (str): Path where to save the thermal image.
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            if not hasattr(self, 'thermal_engine'):
+                return False
+                
+            return self.thermal_engine.export_thermal_image(
+                file_path, self.selected_palette, self.palette_inverted
+            )
+        except Exception as e:
+            print(f"Error exporting thermal image: {e}")
+            return False
+
+    def _export_visible_image(self, file_path: str) -> bool:
+        """
+        Export the visible light image if available.
+        
+        Args:
+            file_path (str): Path where to save the visible image.
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            if not hasattr(self, 'thermal_engine'):
+                return False
+                
+            return self.thermal_engine.export_visible_image(file_path)
+        except Exception as e:
+            print(f"Error exporting visible image: {e}")
+            return False
+
+    def _export_overlay_image(self, file_path: str) -> bool:
+        """
+        Export overlay composition, forcing overlay mode if both visible and thermal images are available.
+        
+        Args:
+            file_path (str): Path where to save the overlay image.
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            if not hasattr(self, 'image_view'):
+                return False
+                
+            # Check if we have BOTH visible and thermal images to create overlay
+            has_visible = (hasattr(self, 'thermal_engine') and 
+                          self.thermal_engine.base_pixmap_visible is not None and 
+                          not self.thermal_engine.base_pixmap_visible.isNull())
+            
+            has_thermal = (hasattr(self, 'thermal_engine') and 
+                          self.thermal_engine.base_pixmap is not None and 
+                          not self.thermal_engine.base_pixmap.isNull())
+            
+            # Force overlay only if BOTH images are available
+            force_overlay = has_visible and has_thermal
+            
+            if force_overlay:
+                print("🎭 Forcing overlay mode for export (both visible and thermal images available)")
+                
+                # Ensure the visible image is loaded in the view before export
+                # This is crucial when overlay mode has been disabled - the visible image
+                # might not be loaded in the graphics view even if it exists in thermal_engine
+                if (self.image_view._visible_item.pixmap().isNull() and 
+                    self.thermal_engine.base_pixmap_visible is not None):
+                    print("📷 Loading visible image into view for overlay export")
+                    self.image_view.set_visible_pixmap(self.thermal_engine.base_pixmap_visible)
+                
+                # Apply current overlay settings before export
+                # This ensures correct scale, offset, and alpha are applied
+                print(f"🔧 Applying overlay settings for export:")
+                print(f"  - Scale: {self.overlay_scale}")
+                print(f"  - Offset: ({self.overlay_offset_x}, {self.overlay_offset_y})")
+                print(f"  - Alpha: {self.overlay_alpha}")
+                print(f"  - Blend mode: {self.overlay_blend_mode}")
+                
+                offset = QPointF(self.overlay_offset_x, self.overlay_offset_y)
+                blend_mode = self.get_qt_composition_mode()
+                
+                # Temporarily apply overlay settings to the view
+                self.image_view.update_overlay(
+                    visible=True,
+                    alpha=self.overlay_alpha,
+                    scale=self.overlay_scale,
+                    offset=offset,
+                    blend_mode=blend_mode
+                )
+            
+            else:
+                print("⚠️ Cannot create true overlay - missing images:")
+                print(f"  - Visible image: {'✓' if has_visible else '✗'}")
+                print(f"  - Thermal image: {'✓' if has_thermal else '✗'}")
+            
+            return self.image_view.export_overlay_image(file_path, force_overlay=force_overlay)
+        except Exception as e:
+            print(f"Error exporting overlay image: {e}")
+            return False
+
+    def _export_thermal_with_rois(self, file_path: str) -> bool:
+        """
+        Export thermal image with ROIs drawn on top.
+        
+        Args:
+            file_path (str): Path where to save the thermal image with ROIs.
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            if not hasattr(self, 'thermal_engine'):
+                return False
+            
+            # Debug: check ROI items
+            print(f"🔍 Export thermal with ROIs:")
+            print(f"  📊 Total ROI items: {len(self.roi_items)}")
+            for roi_id, roi_item in self.roi_items.items():
+                try:
+                    if hasattr(roi_item, 'model'):  # CORRECTED: use 'model' instead of 'roi_model'
+                        roi_model = roi_item.model
+                        print(f"    • {roi_id}: {roi_model.name} ({roi_model.__class__.__name__})")
+                        print(f"      Position: ({roi_model.x:.1f}, {roi_model.y:.1f})")
+                        if hasattr(roi_model, 'temp_mean') and roi_model.temp_mean is not None:
+                            print(f"      Temp stats: {roi_model.temp_mean:.1f}°C avg")
+                    else:
+                        print(f"    • {roi_id}: No model found")
+                except Exception as e:
+                    print(f"    • {roi_id}: Error accessing ROI - {e}")
+                
+            return self.thermal_engine.export_thermal_with_rois(
+                file_path, self.selected_palette, self.palette_inverted, self.roi_items
+            )
+        except Exception as e:
+            print(f"Error exporting thermal image with ROIs: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _export_current_scene(self, file_path: str) -> bool:
+        """
+        Export the current scene exactly as displayed.
+        
+        Args:
+            file_path (str): Path where to save the current scene.
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            if not hasattr(self, 'image_view'):
+                return False
+                
+            return self.image_view.export_current_scene(file_path)
+        except Exception as e:
+            print(f"Error exporting current scene: {e}")
+            return False
+
+    def _export_analysis_csv(self, file_path: str) -> bool:
+        """
+        Export analysis data to CSV format including global parameters and ROI statistics.
+        
+        Args:
+            file_path (str): Path where to save the CSV file.
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            import csv
+            import os
+            from datetime import datetime
+            
+            with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                
+                # Write header with global parameters
+                writer.writerow(["# Thermal Analysis Export"])
+                writer.writerow(["# Generated on", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+                writer.writerow([])
+                
+                # Original image information
+                if hasattr(self, 'thermal_engine') and self.thermal_engine.current_image_path:
+                    writer.writerow(["Original Image", os.path.basename(self.thermal_engine.current_image_path)])
+                else:
+                    writer.writerow(["Original Image", "Unknown"])
+                
+                # Global thermal parameters
+                writer.writerow([])
+                writer.writerow(["# Global Thermal Parameters"])
+                thermal_params = self.get_current_thermal_parameters()
+                for param, value in thermal_params.items():
+                    writer.writerow([param, value])
+                
+                # Global temperature statistics
+                writer.writerow([])
+                writer.writerow(["# Global Temperature Statistics"])
+                if hasattr(self, 'thermal_engine'):
+                    global_stats = self.thermal_engine.get_global_statistics()
+                    for stat, value in global_stats.items():
+                        writer.writerow([stat, f"{value:.2f}" if value is not None else "N/A"])
+                
+                # Palette settings
+                writer.writerow([])
+                writer.writerow(["# Visualization Settings"])
+                writer.writerow(["Color Palette", self.selected_palette])
+                writer.writerow(["Palette Inverted", self.palette_inverted])
+                writer.writerow(["Overlay Mode", self.overlay_mode])
+                if self.overlay_mode:
+                    writer.writerow(["Overlay Scale", f"{self.overlay_scale:.3f}"])
+                    writer.writerow(["Overlay Offset X", f"{self.overlay_offset_x:.1f}"])
+                    writer.writerow(["Overlay Offset Y", f"{self.overlay_offset_y:.1f}"])
+                    writer.writerow(["Overlay Alpha", f"{self.overlay_alpha:.2f}"])
+                    writer.writerow(["Overlay Blend Mode", self.overlay_blend_mode])
+                
+                # ROI Analysis Data
+                writer.writerow([])
+                writer.writerow(["# ROI Analysis Data"])
+                
+                if hasattr(self, 'roi_controller'):
+                    roi_data = self.roi_controller.export_detailed_roi_data()
+                    if roi_data:
+                        # Write ROI table header
+                        writer.writerow([
+                            "roi_name", "roi_type", "emissivity", 
+                            "temp_min_celsius", "temp_max_celsius", "temp_mean_celsius", 
+                            "temp_median_celsius", "temp_std_dev_celsius", "pixel_count"
+                        ])
+                        
+                        # Write ROI data rows
+                        for roi in roi_data:
+                            writer.writerow([
+                                roi.get("name", ""),
+                                roi.get("type", ""),
+                                f"{roi.get('emissivity', 0.95):.3f}",
+                                f"{roi.get('temp_min', 0):.2f}" if roi.get('temp_min') is not None else "N/A",
+                                f"{roi.get('temp_max', 0):.2f}" if roi.get('temp_max') is not None else "N/A",
+                                f"{roi.get('temp_mean', 0):.2f}" if roi.get('temp_mean') is not None else "N/A",
+                                f"{roi.get('temp_median', 0):.2f}" if roi.get('temp_median') is not None else "N/A",
+                                f"{roi.get('temp_std', 0):.2f}" if roi.get('temp_std') is not None else "N/A",
+                                roi.get('pixel_count', 0)
+                            ])
+                    else:
+                        writer.writerow(["# No ROIs defined"])
+                else:
+                    writer.writerow(["# ROI controller not available"])
+                
+            return True
+            
+        except Exception as e:
+            print(f"Error exporting CSV: {e}")
+            return False
 
     def on_roi_modified(self, roi_model):
         """Handle ROI modified event from both UI and controller."""

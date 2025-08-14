@@ -444,3 +444,52 @@ class ROIController(QObject):
                 print(f"Error importing ROI: {e}")
                 
         return imported_count
+
+    def export_detailed_roi_data(self) -> List[Dict[str, Any]]:
+        """
+        Export detailed ROI data including all calculated statistics.
+        
+        Returns:
+            List[Dict[str, Any]]: List of detailed ROI data dictionaries.
+        """
+        detailed_data = []
+        
+        for roi in self.rois:
+            try:
+                # Get basic ROI data
+                data = {
+                    "name": roi.name,
+                    "type": roi.__class__.__name__,
+                    "emissivity": getattr(roi, 'emissivity', 0.95),
+                    "temp_min": getattr(roi, 'temp_min', None),
+                    "temp_max": getattr(roi, 'temp_max', None),
+                    "temp_mean": getattr(roi, 'temp_mean', None),
+                    "temp_median": getattr(roi, 'temp_median', None),
+                    "temp_std": getattr(roi, 'temp_std', None),
+                    "pixel_count": 0
+                }
+                
+                # Calculate pixel count
+                if self.thermal_engine and self.thermal_engine.thermal_data is not None:
+                    roi_mask = self._create_roi_mask(roi)
+                    if roi_mask is not None:
+                        data["pixel_count"] = int(np.sum(roi_mask))
+                
+                detailed_data.append(data)
+                
+            except Exception as e:
+                print(f"Error exporting ROI data for {roi.name}: {e}")
+                # Add minimal data for failed ROI
+                detailed_data.append({
+                    "name": getattr(roi, 'name', 'Unknown'),
+                    "type": roi.__class__.__name__,
+                    "emissivity": getattr(roi, 'emissivity', 0.95),
+                    "temp_min": None,
+                    "temp_max": None,
+                    "temp_mean": None,
+                    "temp_median": None,
+                    "temp_std": None,
+                    "pixel_count": 0
+                })
+                
+        return detailed_data

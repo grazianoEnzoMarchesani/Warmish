@@ -124,8 +124,13 @@ class RectROIItem(QGraphicsRectItem):
     
     def _show_hide_handles(self, show: bool):
         """Show or hide handles."""
+        # Add safety check
+        if not hasattr(self, '_handle_items'):
+            self._handle_items = {}
+        
         if show and not self._handle_items:
-            self._create_handle_items()
+            if hasattr(self, '_create_handle_items'):
+                self._create_handle_items()
         
         if self._handle_items:
             for handle_item in self._handle_items.values():
@@ -133,25 +138,25 @@ class RectROIItem(QGraphicsRectItem):
     
     def _highlight_handle(self, handle_key: str = None):
         """Highlight a specific handle or remove highlighting."""
+        # Add safety check
+        if not hasattr(self, '_handle_items'):
+            self._handle_items = {}
+            
         if not self._handle_items:
             return
             
         for key, handle_item in self._handle_items.items():
             if key == handle_key:
-                # Highlight this handle
-                highlight_brush = QBrush(QColor(255, 150, 0, 220))  # Bright orange
-                handle_item.setBrush(highlight_brush)
+                handle_item.setBrush(QBrush(QColor(255, 255, 0, 150)))  # Yellow highlight
             else:
-                # Normal color
-                normal_brush = QBrush(QColor(100, 150, 255, 180))
-                handle_item.setBrush(normal_brush)
+                handle_item.setBrush(QBrush(QColor(255, 255, 255, 100)))  # Normal white
 
     def itemChange(self, change, value):
         """
-        Handle item changes, specifically position changes to sync with model.
+        Handle changes to the item (like position or selection).
         
         Args:
-            change: Type of change (QGraphicsItem.GraphicsItemChange)
+            change: Type of change occurring
             value: New value associated with the change
             
         Returns:
@@ -159,16 +164,16 @@ class RectROIItem(QGraphicsRectItem):
         """
         if change == QGraphicsItem.ItemPositionHasChanged:
             # Update the model coordinates when the item is moved
-            offset = value
-            # Update all points in the model
-            original_polygon = self.polygon()
-            for i, point in enumerate(self.model.points):
-                new_point = original_polygon[i] + offset
-                self.model.points[i] = (new_point.x(), new_point.y())
+            new_pos = value
+            self.model.x = new_pos.x()
+            self.model.y = new_pos.y()
             
-            # NOTE: Don't notify during movement to avoid continuous temperature 
-            # recalculations. The notification will be sent only when the movement
-            # is completed in mouseReleaseEvent().
+            # Notify about ROI modification (get the view from scene)
+            view_list = self.scene().views()
+            if view_list:
+                view = view_list[0]
+                if hasattr(view, "notify_roi_modified"):
+                    view.notify_roi_modified(self.model)
         
         return super().itemChange(change, value)
     def update_from_model(self):
@@ -239,21 +244,81 @@ class RectROIItem(QGraphicsRectItem):
         return None
 
     def hoverEnterEvent(self, event):
-        """Handle mouse enter event in ROI area."""
-        self._show_handles = True
-        self._show_hide_handles(True)
+        """Handle mouse entering the item area."""
+        # Add safety checks
+        if not hasattr(self, '_handle_items'):
+            self._handle_items = {}
+            
+        # Check if this is a PolygonROIItem
+        if hasattr(self, '_show_vertices') and hasattr(self, '_show_hide_vertices'):
+            self._show_vertices = True
+            self._show_hide_vertices(True)
+        elif hasattr(self, '_show_hide_handles'):
+            self._show_hide_handles(True)
+            
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
-        """Handle mouse leave event from ROI area."""
-        self._show_handles = False
-        self._show_hide_handles(False)
-        self._hovered_handle = None
+        """Handle mouse leaving the item area."""
+        # Add safety checks
+        if not hasattr(self, '_handle_items'):
+            self._handle_items = {}
+            
+        # Check if this is a PolygonROIItem
+        if hasattr(self, '_show_vertices') and hasattr(self, '_show_hide_vertices'):
+            self._show_vertices = False
+            self._show_hide_vertices(False)
+            if hasattr(self, '_hovered_vertex'):
+                self._hovered_vertex = -1
+        elif hasattr(self, '_show_hide_handles'):
+            self._show_hide_handles(False)
+            
         super().hoverLeaveEvent(event)
 
     def hoverMoveEvent(self, event):
-        """Handle mouse move events within the ROI to show appropriate cursors."""
-        h = self._handle_at(event.pos())
+        """
+        Handle mouse movement over the item for interactive feedback.
+        
+        Args:
+            event: Hover move event containing position information
+        """
+        # Add safety check for _hovered_handle
+        if not hasattr(self, '_hovered_handle'):
+            self._hovered_handle = None
+            
+        if not hasattr(self, '_handle_items'):
+            self._handle_items = {}
+            
+        # Check if this is a PolygonROIItem with different hover behavior
+        if hasattr(self, '_hovered_vertex') and hasattr(self, '_get_vertex_at'):
+            # This is polygon-specific behavior
+            vertex_idx = self._get_vertex_at(event.pos())
+            if vertex_idx >= 0:
+                self.setCursor(QCursor(Qt.SizeAllCursor))
+            else:
+                self.setCursor(QCursor(Qt.ArrowCursor))
+            
+            # Highlight the vertex under the mouse
+            if vertex_idx != self._hovered_vertex:
+                self._hovered_vertex = vertex_idx
+                if hasattr(self, '_highlight_vertex'):
+                    self._highlight_vertex(vertex_idx)
+            
+            super().hoverMoveEvent(event)
+            return
+        
+        # This is rect/spot ROI behavior
+        if hasattr(self, '_resizing') and (self._resizing or not getattr(self, '_show_handles', False)):
+            super().hoverMoveEvent(event)
+            return
+        
+        # Find which handle is under the mouse
+        local_pos = event.pos()
+        h = None
+        if hasattr(self, '_handle_at'):
+            h = self._handle_at(local_pos)
+        
+        # Update cursor based on handle position
         cursors = {
             "tl": Qt.SizeFDiagCursor, "br": Qt.SizeFDiagCursor,
             "tr": Qt.SizeBDiagCursor, "bl": Qt.SizeBDiagCursor,
@@ -261,12 +326,13 @@ class RectROIItem(QGraphicsRectItem):
             "t": Qt.SizeVerCursor, "b": Qt.SizeVerCursor,
             None: Qt.ArrowCursor,
         }
-        self.setCursor(QCursor(cursors[h]))
+        self.setCursor(QCursor(cursors.get(h, Qt.ArrowCursor)))
         
         # Highlight the handle under the mouse
         if h != self._hovered_handle:
             self._hovered_handle = h
-            self._highlight_handle(h)
+            if hasattr(self, '_highlight_handle'):
+                self._highlight_handle(h)
         
         super().hoverMoveEvent(event)
 
@@ -919,6 +985,11 @@ class PolygonROIItem(QGraphicsPolygonItem):
         self._show_vertices = False
         self._hovered_vertex = -1
         self._vertex_items = []  # List of visible vertex handles
+        
+        # ADD MISSING ATTRIBUTES for compatibility with shared methods
+        self._hovered_handle = None
+        self._handle_items = {}
+        self._show_handles = False
         
         # Initial color (from model if present)
         self._color = getattr(self.model, "color", QColor(255, 165, 0))

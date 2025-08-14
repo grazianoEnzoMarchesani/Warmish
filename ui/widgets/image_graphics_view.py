@@ -1,7 +1,8 @@
-from typing import Optional
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QStyleOptionGraphicsItem, QGraphicsPolygonItem
+from typing import Optional, List, Dict, Any
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QWidget, QStyleOptionGraphicsItem, QGraphicsPolygonItem, QMessageBox, QFileDialog, QApplication
 from PySide6.QtCore import Qt, QPointF, Signal, QRectF
 from PySide6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QTransform, QPen, QBrush, QColor, QPolygonF
+import numpy as np
 
 
 class BlendablePixmapItem(QGraphicsPixmapItem):
@@ -283,6 +284,10 @@ class ImageGraphicsView(QGraphicsView):
         if not self._overlay_mode:
             return
         
+        print(f"🔧 _update_overlay_positioning called")
+        print(f"  - Overlay scale: {self._overlay_scale}")
+        print(f"  - Overlay offset: {self._overlay_offset}")
+        
         # Reset transformations
         self._visible_item.setTransform(QTransform())
         self._thermal_item.setTransform(QTransform())
@@ -291,6 +296,8 @@ class ImageGraphicsView(QGraphicsView):
         if not self._visible_item.pixmap().isNull():
             visible_rect = self._visible_item.boundingRect()
             self._visible_item.setPos(-visible_rect.width()/2, -visible_rect.height()/2)
+            print(f"  - Visible image positioned at: {self._visible_item.pos()}")
+            print(f"  - Visible image rect: {visible_rect}")
             
             # Reset view and fit visible image
             self.resetTransform()
@@ -310,13 +317,21 @@ class ImageGraphicsView(QGraphicsView):
                 visible_width = visible_pixmap.width()
                 visible_height = visible_pixmap.height()
                 
+                print(f"  - Thermal original: {thermal_width}x{thermal_height}")
+                print(f"  - Visible original: {visible_width}x{visible_height}")
+                
                 # Calculate "natural" scale ratio if images were same size
                 natural_scale_x = visible_width / thermal_width if thermal_width > 0 else 1.0
                 natural_scale_y = visible_height / thermal_height if thermal_height > 0 else 1.0
                 natural_scale = min(natural_scale_x, natural_scale_y)
                 
+                print(f"  - Natural scale X: {natural_scale_x}")
+                print(f"  - Natural scale Y: {natural_scale_y}")
+                print(f"  - Natural scale: {natural_scale}")
+                
                 # Apply user scale multiplied by natural scale
                 final_scale = self._overlay_scale * natural_scale
+                print(f"  - Final scale: {final_scale}")
                 
                 # Apply transformation
                 transform = QTransform()
@@ -327,6 +342,9 @@ class ImageGraphicsView(QGraphicsView):
                 thermal_rect = self._thermal_item.boundingRect()
                 scaled_thermal_rect = transform.mapRect(thermal_rect)
                 
+                print(f"  - Thermal rect before transform: {thermal_rect}")
+                print(f"  - Thermal rect after transform: {scaled_thermal_rect}")
+                
                 # Offsets are provided in original visible image pixels
                 # Must convert to scene coordinates
                 visible_rect = self._visible_item.boundingRect()
@@ -335,13 +353,20 @@ class ImageGraphicsView(QGraphicsView):
                 scale_x = visible_rect.width() / visible_width
                 scale_y = visible_rect.height() / visible_height
                 
+                print(f"  - Scene scale X: {scale_x}")
+                print(f"  - Scene scale Y: {scale_y}")
+                
                 # Convert offsets from visible image pixels to scene coordinates
                 offset_x_scene = self._overlay_offset.x() * scale_x
                 offset_y_scene = self._overlay_offset.y() * scale_y
                 
+                print(f"  - Scene offsets: ({offset_x_scene}, {offset_y_scene})")
+                
                 # Position thermal image centered plus offset
                 pos_x = -scaled_thermal_rect.width()/2 + offset_x_scene
                 pos_y = -scaled_thermal_rect.height()/2 + offset_y_scene
+                
+                print(f"  - Thermal final position: ({pos_x}, {pos_y})")
                 
                 self._thermal_item.setPos(pos_x, pos_y)
             else:
@@ -911,4 +936,239 @@ class ImageGraphicsView(QGraphicsView):
             dict: Dictionary with label visibility settings.
         """
         return self._roi_label_settings
+        
+    def export_overlay_image(self, file_path: str, force_overlay: bool = False) -> bool:
+        """
+        Export overlay composition, optionally forcing overlay mode.
+        
+        Args:
+            file_path (str): Path where to save the exported image.
+            force_overlay (bool): If True, temporarily enable overlay mode for export.
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            if not self._scene:
+                print("No scene available for export")
+                return False
+            
+            # Debug: Print current state
+            print(f"🔍 Export overlay debug:")
+            print(f"  - Force overlay: {force_overlay}")
+            print(f"  - Current overlay mode: {self._overlay_mode}")
+            print(f"  - Current overlay alpha: {self._overlay_alpha}")
+            print(f"  - Visible pixmap null: {self._visible_item.pixmap().isNull()}")
+            print(f"  - Thermal pixmap null: {self._thermal_item.pixmap().isNull()}")
+            print(f"  - Visible item visible: {self._visible_item.isVisible()}")
+            print(f"  - Thermal item visible: {self._thermal_item.isVisible()}")
+            print(f"  - Thermal item opacity: {self._thermal_item.opacity()}")
+            print(f"  - Visible item ZValue: {self._visible_item.zValue()}")
+            print(f"  - Thermal item ZValue: {self._thermal_item.zValue()}")
+            
+            # Store current overlay state
+            original_overlay_mode = self._overlay_mode
+            original_visible_visibility = self._visible_item.isVisible()
+            original_thermal_visibility = self._thermal_item.isVisible()
+            original_thermal_opacity = self._thermal_item.opacity()
+            
+            try:
+                # Force overlay mode if requested and BOTH images are available
+                if force_overlay and (not self._visible_item.pixmap().isNull() and 
+                                    not self._thermal_item.pixmap().isNull()):
+                    print("🎭 Forcing overlay mode for export")
+                    
+                    # Temporarily enable overlay
+                    self._overlay_mode = True
+                    self._visible_item.setVisible(True)
+                    self._thermal_item.setVisible(True)
+                    
+                    # Use the configured opacity instead of hardcoded value
+                    print(f"  🎨 Using configured opacity: {self._overlay_alpha}")
+                    self._thermal_item.setOpacity(self._overlay_alpha)
+                    
+                    # Apply the configured blend mode
+                    print(f"  🎭 Using configured blend mode: {self._blend_mode}")
+                    self._thermal_item.set_blend_mode(self._blend_mode)
+                    
+                    # Ensure correct Z-order
+                    self._visible_item.setZValue(0)
+                    self._thermal_item.setZValue(1)
+                    
+                    print(f"  🔧 After forcing overlay:")
+                    print(f"    - Overlay mode: {self._overlay_mode}")
+                    print(f"    - Visible item visible: {self._visible_item.isVisible()}")
+                    print(f"    - Thermal item visible: {self._thermal_item.isVisible()}")
+                    print(f"    - Thermal item opacity: {self._thermal_item.opacity()}")
+                    print(f"    - Thermal item blend mode: {self._blend_mode}")
+                    print(f"    - Visible item ZValue: {self._visible_item.zValue()}")
+                    print(f"    - Thermal item ZValue: {self._thermal_item.zValue()}")
+                    
+                    # Update positioning
+                    self._update_overlay_positioning()
+                    
+                    print(f"  📍 After positioning update:")
+                    print(f"    - Visible item pos: {self._visible_item.pos()}")
+                    print(f"    - Thermal item pos: {self._thermal_item.pos()}")
+                    print(f"    - Visible item rect: {self._visible_item.boundingRect()}")
+                    print(f"    - Thermal item rect: {self._thermal_item.boundingRect()}")
+                    
+                elif force_overlay:
+                    print("⚠️ Cannot force overlay mode - missing image data:")
+                    print(f"  - Visible item pixmap: {'✓' if not self._visible_item.pixmap().isNull() else '✗'}")
+                    print(f"  - Thermal item pixmap: {'✓' if not self._thermal_item.pixmap().isNull() else '✗'}")
+                
+                # Get the scene rectangle
+                scene_rect = self._scene.itemsBoundingRect()
+                
+                print(f"📏 Scene info:")
+                print(f"  - Scene rect: {scene_rect}")
+                print(f"  - Scene rect empty: {scene_rect.isEmpty()}")
+                
+                if scene_rect.isEmpty():
+                    print("Scene is empty, nothing to export")
+                    return False
+                
+                # Determine export size - use high resolution for quality
+                scale_factor = 2.0
+                export_width = int(scene_rect.width() * scale_factor)
+                export_height = int(scene_rect.height() * scale_factor)
+                
+                # Ensure reasonable size limits
+                max_dimension = 8192
+                if export_width > max_dimension or export_height > max_dimension:
+                    ratio = min(max_dimension / export_width, max_dimension / export_height)
+                    export_width = int(export_width * ratio)
+                    export_height = int(export_height * ratio)
+                    scale_factor = scale_factor * ratio
+                
+                print(f"🖼️ Export dimensions: {export_width}x{export_height} (scale: {scale_factor})")
+                
+                # Create pixmap for rendering
+                export_pixmap = QPixmap(export_width, export_height)
+                export_pixmap.fill(Qt.black)
+                
+                # Create painter for rendering
+                painter = QPainter(export_pixmap)
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                
+                # Scale the painter for high-resolution export
+                painter.scale(scale_factor, scale_factor)
+                
+                # Render the scene to the painter
+                self._scene.render(painter, QRectF(0, 0, scene_rect.width(), scene_rect.height()), scene_rect)
+                
+                painter.end()
+                
+                # Save the exported image
+                success = export_pixmap.save(file_path, "PNG")
+                
+                if success:
+                    print(f"✅ Overlay image exported successfully: {file_path}")
+                    print(f"  - Resolution: {export_width}x{export_height}")
+                    print(f"  - Scale factor: {scale_factor:.1f}x")
+                    if force_overlay and not original_overlay_mode:
+                        print("  - Overlay mode was forced for export")
+                else:
+                    print(f"❌ Failed to save overlay image: {file_path}")
+                    
+                return success
+                
+            finally:
+                print("🔄 Restoring original state...")
+                # Restore original state
+                self._overlay_mode = original_overlay_mode
+                self._visible_item.setVisible(original_visible_visibility)
+                self._thermal_item.setVisible(original_thermal_visibility)
+                self._thermal_item.setOpacity(original_thermal_opacity)
+                
+                print(f"  - Restored overlay mode: {self._overlay_mode}")
+                print(f"  - Restored visible visibility: {self._visible_item.isVisible()}")
+                print(f"  - Restored thermal visibility: {self._thermal_item.isVisible()}")
+                print(f"  - Restored thermal opacity: {self._thermal_item.opacity()}")
+                
+                # Restore original positioning if needed
+                if not original_overlay_mode:
+                    self._fit_thermal_in_view()
+                    print("  - Restored thermal fit in view")
+                
+        except Exception as e:
+            print(f"Error exporting overlay image: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def export_current_scene(self, file_path: str) -> bool:
+        """
+        Export the current scene exactly as displayed (without forcing any mode changes).
+        
+        Args:
+            file_path (str): Path where to save the exported image.
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            if not self._scene:
+                print("No scene available for export")
+                return False
+            
+            # Get the scene rectangle
+            scene_rect = self._scene.itemsBoundingRect()
+            
+            if scene_rect.isEmpty():
+                print("Scene is empty, nothing to export")
+                return False
+            
+            # Use current view rectangle instead of scene bounds for exact view capture
+            view_rect = self.mapToScene(self.viewport().rect()).boundingRect()
+            
+            # Determine export size
+            scale_factor = 2.0
+            export_width = int(view_rect.width() * scale_factor)
+            export_height = int(view_rect.height() * scale_factor)
+            
+            # Ensure reasonable size limits
+            max_dimension = 8192
+            if export_width > max_dimension or export_height > max_dimension:
+                ratio = min(max_dimension / export_width, max_dimension / export_height)
+                export_width = int(export_width * ratio)
+                export_height = int(export_height * ratio)
+                scale_factor = scale_factor * ratio
+            
+            # Create pixmap for rendering
+            export_pixmap = QPixmap(export_width, export_height)
+            export_pixmap.fill(Qt.black)
+            
+            # Create painter for rendering
+            painter = QPainter(export_pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            
+            # Scale the painter for high-resolution export
+            painter.scale(scale_factor, scale_factor)
+            
+            # Render the current view
+            self._scene.render(painter, QRectF(0, 0, view_rect.width(), view_rect.height()), view_rect)
+            
+            painter.end()
+            
+            # Save the exported image
+            success = export_pixmap.save(file_path, "PNG")
+            
+            if success:
+                print(f"Current scene exported successfully: {file_path}")
+                print(f"  - Resolution: {export_width}x{export_height}")
+                print(f"  - Scale factor: {scale_factor:.1f}x")
+            else:
+                print(f"Failed to save current scene: {file_path}")
+                
+            return success
+            
+        except Exception as e:
+            print(f"Error exporting current scene: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
         

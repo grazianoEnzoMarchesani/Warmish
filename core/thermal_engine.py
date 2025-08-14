@@ -12,8 +12,8 @@ import subprocess
 import numpy as np
 from PIL import Image
 import exiftool
-from PySide6.QtGui import QPixmap, QImage
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QPixmap, QImage, QPainter, QPen, QBrush, QColor, QPolygonF
+from PySide6.QtCore import QObject, Signal, Qt, QPointF, QRectF
 
 from constants import PALETTE_MAP
 import matplotlib.cm as cm
@@ -453,3 +453,368 @@ class ThermalEngine(QObject):
         self.temp_min = 0.0
         self.temp_max = 100.0
         self.current_image_path = None
+
+    def export_thermal_image(self, file_path: str, palette_name: str = "Iron", 
+                           inverted: bool = False, scale_factor: float = 2.0) -> bool:
+        """
+        Export the thermal image with specified palette settings.
+        
+        Args:
+            file_path (str): Path where to save the image.
+            palette_name (str): Color palette to use.
+            inverted (bool): Whether to invert the palette.
+            scale_factor (float): Scale factor for export resolution (default 2.0 for high quality).
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            # Create colored pixmap with specified settings
+            pixmap = self.create_colored_pixmap(palette_name, inverted)
+            
+            if pixmap.isNull():
+                print("Error: Cannot create thermal pixmap for export")
+                return False
+            
+            # Apply scale factor for higher resolution export
+            if scale_factor != 1.0:
+                original_size = pixmap.size()
+                scaled_width = int(original_size.width() * scale_factor)
+                scaled_height = int(original_size.height() * scale_factor)
+                
+                print(f"🔍 Scaling thermal image from {original_size.width()}x{original_size.height()} to {scaled_width}x{scaled_height} (scale: {scale_factor}x)")
+                
+                # Scale the pixmap using smooth transformation
+                pixmap = pixmap.scaled(scaled_width, scaled_height, 
+                                     Qt.KeepAspectRatio, 
+                                     Qt.SmoothTransformation)
+            
+            # Save the pixmap
+            success = pixmap.save(file_path, "PNG")
+            
+            if success:
+                print(f"✅ Thermal image exported successfully: {file_path}")
+                print(f"  - Final resolution: {pixmap.width()}x{pixmap.height()}")
+            else:
+                print(f"❌ Failed to save thermal image: {file_path}")
+                
+            return success
+            
+        except Exception as e:
+            print(f"Error exporting thermal image: {e}")
+            return False
+
+    def export_visible_image(self, file_path: str) -> bool:
+        """
+        Export the visible light image if available.
+        
+        Args:
+            file_path (str): Path where to save the image.
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            if self.base_pixmap_visible is None or self.base_pixmap_visible.isNull():
+                print("No visible light image available for export")
+                return False
+            
+            # Save the visible image pixmap
+            success = self.base_pixmap_visible.save(file_path, "PNG")
+            
+            if success:
+                print(f"Visible image exported successfully: {file_path}")
+            else:
+                print(f"Failed to save visible image: {file_path}")
+                
+            return success
+            
+        except Exception as e:
+            print(f"Error exporting visible image: {e}")
+            return False
+
+    def get_global_statistics(self) -> dict:
+        """
+        Get global temperature statistics for the entire thermal image.
+        
+        Returns:
+            dict: Dictionary containing global temperature statistics.
+        """
+        stats = {
+            "global_temp_min_celsius": None,
+            "global_temp_max_celsius": None,
+            "global_temp_mean_celsius": None,
+            "global_temp_median_celsius": None,
+            "global_temp_std_dev_celsius": None,
+            "total_pixel_count": 0
+        }
+        
+        try:
+            if self.temperature_data is not None:
+                # Get all finite temperature values
+                finite_temps = self.temperature_data[np.isfinite(self.temperature_data)]
+                
+                if len(finite_temps) > 0:
+                    stats["global_temp_min_celsius"] = float(np.min(finite_temps))
+                    stats["global_temp_max_celsius"] = float(np.max(finite_temps))
+                    stats["global_temp_mean_celsius"] = float(np.mean(finite_temps))
+                    stats["global_temp_median_celsius"] = float(np.median(finite_temps))
+                    stats["global_temp_std_dev_celsius"] = float(np.std(finite_temps))
+                    stats["total_pixel_count"] = len(finite_temps)
+                    
+        except Exception as e:
+            print(f"Error calculating global statistics: {e}")
+            
+        return stats
+
+    def export_thermal_with_rois(self, file_path: str, palette_name: str = "Iron", 
+                                inverted: bool = False, roi_items: dict = None, scale_factor: float = 2.0) -> bool:
+        """
+        Export thermal image with ROIs drawn on top.
+        
+        Args:
+            file_path (str): Path where to save the image.
+            palette_name (str): Color palette to use.
+            inverted (bool): Whether to invert the palette.
+            roi_items (dict): Dictionary of ROI items to draw.
+            scale_factor (float): Scale factor for export resolution (default 2.0 for high quality).
+            
+        Returns:
+            bool: True if export was successful, False otherwise.
+        """
+        try:
+            # Create base thermal pixmap
+            thermal_pixmap = self.create_colored_pixmap(palette_name, inverted)
+            
+            if thermal_pixmap.isNull():
+                print("Error: Cannot create thermal pixmap for ROI export")
+                return False
+            
+            print(f"🎨 Created thermal pixmap: {thermal_pixmap.width()}x{thermal_pixmap.height()}")
+            
+            # Apply scale factor for higher resolution export
+            if scale_factor != 1.0:
+                original_size = thermal_pixmap.size()
+                scaled_width = int(original_size.width() * scale_factor)
+                scaled_height = int(original_size.height() * scale_factor)
+                
+                print(f"🔍 Scaling thermal image from {original_size.width()}x{original_size.height()} to {scaled_width}x{scaled_height} (scale: {scale_factor}x)")
+                
+                # Scale the pixmap using smooth transformation
+                thermal_pixmap = thermal_pixmap.scaled(scaled_width, scaled_height, 
+                                                     Qt.KeepAspectRatio, 
+                                                     Qt.SmoothTransformation)
+                
+                print(f"🎨 Scaled thermal pixmap: {thermal_pixmap.width()}x{thermal_pixmap.height()}")
+            
+            # Check if we have ROIs to draw
+            if not roi_items:
+                print("⚠️ No ROI items provided, saving plain thermal image")
+                return thermal_pixmap.save(file_path, "PNG")
+            
+            print(f"📊 Drawing {len(roi_items)} ROIs on thermal image")
+            
+            # Create a painter to draw ROIs on top
+            painter = QPainter(thermal_pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            roi_count = 0
+            # Draw each ROI
+            for roi_id, roi_item in roi_items.items():
+                try:
+                    # Access ROI model
+                    if hasattr(roi_item, 'model'):
+                        roi_model = roi_item.model
+                        print(f"  🔸 Drawing ROI: {roi_model.name} ({roi_model.__class__.__name__})")
+                    else:
+                        print(f"⚠️ Cannot find model in ROI item {roi_id}")
+                        continue
+                    
+                    # Set pen for ROI outline (scale thickness with image)
+                    pen_width = max(1, int(3 * scale_factor))
+                    pen = QPen(roi_model.color, pen_width)
+                    painter.setPen(pen)
+                    
+                    # Set brush for ROI fill (semi-transparent)
+                    brush_color = QColor(roi_model.color)
+                    brush_color.setAlpha(80)
+                    painter.setBrush(QBrush(brush_color))
+                    
+                    # Scale ROI coordinates
+                    def scale_coord(coord):
+                        return coord * scale_factor
+                    
+                    # Draw based on ROI type
+                    if hasattr(roi_model, 'width') and hasattr(roi_model, 'height'):
+                        # Rectangular ROI
+                        rect = QRectF(scale_coord(roi_model.x), scale_coord(roi_model.y), 
+                                    scale_coord(roi_model.width), scale_coord(roi_model.height))
+                        painter.drawRect(rect)
+                        print(f"    📐 Drew rectangle: x={rect.x():.1f}, y={rect.y():.1f}, w={rect.width():.1f}, h={rect.height():.1f}")
+                        
+                        # Position label above rectangle (scaled)
+                        metrics = painter.fontMetrics()
+                        label_height = metrics.height() * 2  # Two lines
+                        label_x = scale_coord(roi_model.x) + 2
+                        label_y = scale_coord(roi_model.y) - label_height - 2
+                        self._draw_roi_label_at_position(painter, roi_model, label_x, label_y)
+                        
+                    elif hasattr(roi_model, 'radius'):
+                        # Spot (circular) ROI
+                        center_x, center_y = scale_coord(roi_model.x), scale_coord(roi_model.y)
+                        radius = scale_coord(roi_model.radius)
+                        # Draw ellipse using bounding rectangle
+                        rect = QRectF(center_x - radius, center_y - radius, 
+                                    radius * 2, radius * 2)
+                        painter.drawEllipse(rect)
+                        print(f"    🎯 Drew circle: center=({center_x:.1f}, {center_y:.1f}), radius={radius:.1f}")
+                        
+                        # Position label above circle (scaled)
+                        metrics = painter.fontMetrics()
+                        label_height = metrics.height() * 2  # Two lines
+                        label_x = center_x - radius + 2
+                        label_y = center_y - radius - label_height - 2
+                        self._draw_roi_label_at_position(painter, roi_model, label_x, label_y)
+                        
+                    elif hasattr(roi_model, 'points'):
+                        # Polygon ROI
+                        if len(roi_model.points) >= 3:
+                            polygon = QPolygonF()
+                            for x, y in roi_model.points:
+                                polygon.append(QPointF(scale_coord(x), scale_coord(y)))
+                            painter.drawPolygon(polygon)
+                            print(f"    🔷 Drew polygon with {len(roi_model.points)} points")
+                            
+                            # Position label above polygon bounding box (scaled)
+                            if roi_model.points:
+                                bbox = polygon.boundingRect()
+                                metrics = painter.fontMetrics()
+                                label_height = metrics.height() * 2  # Two lines
+                                label_x = bbox.left() + 2
+                                label_y = bbox.top() - label_height - 2
+                                self._draw_roi_label_at_position(painter, roi_model, label_x, label_y)
+                        else:
+                            print(f"    ⚠️ Polygon has only {len(roi_model.points)} points, skipping")
+                    
+                    roi_count += 1
+                    
+                except Exception as e:
+                    roi_name = "Unknown"
+                    try:
+                        if hasattr(roi_item, 'model'):
+                            roi_name = roi_item.model.name
+                    except:
+                        pass
+                    print(f"❌ Error drawing ROI {roi_name}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+            
+            painter.end()
+            
+            print(f"✅ Successfully drew {roi_count} ROIs")
+            
+            # Save the result
+            success = thermal_pixmap.save(file_path, "PNG")
+            
+            if success:
+                print(f"💾 Thermal image with ROIs exported successfully: {file_path}")
+                print(f"  - Final resolution: {thermal_pixmap.width()}x{thermal_pixmap.height()}")
+            else:
+                print(f"❌ Failed to save thermal image with ROIs: {file_path}")
+                
+            return success
+            
+        except Exception as e:
+            print(f"❌ Error exporting thermal image with ROIs: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _draw_roi_label_at_position(self, painter: QPainter, roi_model, label_x: float, label_y: float):
+        """
+        Draw ROI label with statistics at a specific position.
+        Uses the same format and styling as the normal scene labels.
+        
+        Args:
+            painter (QPainter): Painter to use for drawing.
+            roi_model: ROI model with statistics.
+            label_x (float): X position for the label.
+            label_y (float): Y position for the label.
+        """
+        try:
+            # Use the same format as refresh_label() in roi_items.py
+            def fmt(v): 
+                return f"{v:.2f}" if (v is not None) else "N/A"
+            
+            # First line: name | emissivity
+            parts1 = []
+            parts1.append(roi_model.name)
+            parts1.append(f"ε {getattr(roi_model, 'emissivity', 0.95):.3f}")
+            line1 = " | ".join(parts1)
+
+            # Second line: min | max | mean statistics
+            parts2 = []
+            parts2.append(f"min {fmt(getattr(roi_model, 'temp_min', None))}")
+            parts2.append(f"max {fmt(getattr(roi_model, 'temp_max', None))}")
+            parts2.append(f"mean {fmt(getattr(roi_model, 'temp_mean', None))}")
+            line2 = " | ".join(parts2)
+
+            label_text = f"{line1}\n{line2}"
+            
+            # Use standard font (not bold, smaller size for consistency)
+            font = painter.font()
+            font.setPointSize(10)  # Smaller size, more similar to scene
+            font.setBold(False)   # Not bold like in scene
+            painter.setFont(font)
+            
+            # Calculate text dimensions
+            metrics = painter.fontMetrics()
+            lines = label_text.split('\n')
+            max_width = max(metrics.horizontalAdvance(line) for line in lines)
+            line_height = metrics.height()
+            total_height = line_height * len(lines)
+            
+            # Draw text with white color and black outline for visibility (like scene labels)
+            # First draw black outline
+            painter.setPen(QPen(Qt.black, 3))  # Thick black outline for visibility
+            for i, line in enumerate(lines):
+                text_y = label_y + (i + 1) * line_height - 3
+                for dx in [-1, 0, 1]:
+                    for dy in [-1, 0, 1]:
+                        if dx != 0 or dy != 0:  # Don't draw at center position yet
+                            painter.drawText(QPointF(label_x + dx, text_y + dy), line)
+            
+            # Then draw white text on top
+            painter.setPen(QPen(Qt.white))
+            for i, line in enumerate(lines):
+                text_y = label_y + (i + 1) * line_height - 3
+                painter.drawText(QPointF(label_x, text_y), line)
+                
+            print(f"    🏷️ Drew label for {roi_model.name} at ({label_x:.1f}, {label_y:.1f})")
+                
+        except Exception as e:
+            print(f"❌ Error drawing ROI label: {e}")
+
+    def _draw_roi_label(self, painter: QPainter, roi_model):
+        """
+        Legacy method - now delegates to _draw_roi_label_at_position.
+        """
+        try:
+            # Determine position based on ROI type
+            if hasattr(roi_model, 'x') and hasattr(roi_model, 'y'):
+                # Rectangular or Spot ROI
+                label_x = roi_model.x + 10
+                label_y = roi_model.y + 15
+            elif hasattr(roi_model, 'points') and roi_model.points:
+                # Polygon ROI - use first point
+                first_point = roi_model.points[0]
+                label_x = first_point[0] + 10
+                label_y = first_point[1] + 15
+            else:
+                return  # Can't position label
+            
+            self._draw_roi_label_at_position(painter, roi_model, label_x, label_y)
+                
+        except Exception as e:
+            print(f"❌ Error drawing ROI label (legacy): {e}")
