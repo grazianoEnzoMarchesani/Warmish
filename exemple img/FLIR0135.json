@@ -8,7 +8,7 @@
     "ObjectDistance": 3.469,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "Autumn",
+  "palette": "Sepia",
   "palette_inverted": false,
   "overlay_settings": {
     "scale": 0.7371037717330103,
@@ -28,52 +28,11 @@
   "rois": [
     {
       "type": "SpotROI",
-      "name": "saasas",
+      "name": "Spot_1",
       "emissivity": 0.95,
-      "x": 265.0063993337439,
-      "y": 68.70293237074262,
-      "radius": 37.47300215982719
-    },
-    {
-      "type": "PolygonROI",
-      "name": "Polygon_2",
-      "emissivity": 0.95,
-      "points": [
-        [
-          89.52018879361586,
-          38.81544953242978
-        ],
-        [
-          94.1854155754733,
-          104.1286244784341
-        ],
-        [
-          170.384119679145,
-          102.57354888448161
-        ],
-        [
-          89.52018879361586,
-          38.81544953242978
-        ]
-      ]
-    },
-    {
-      "type": "RectROI",
-      "name": "ROI_3",
-      "emissivity": 0.95,
-      "x": 37,
-      "y": 158,
-      "width": 93.95283690656248,
-      "height": 63.47985240199861
-    },
-    {
-      "type": "RectROI",
-      "name": "ROI_1",
-      "emissivity": 0.95,
-      "x": 243,
-      "y": 162,
-      "width": 43.81471389645776,
-      "height": 47.084468664850135
+      "x": 152.64582235624292,
+      "y": 97.03414570518052,
+      "radius": 8.567222620394347
     }
   ]
 }
