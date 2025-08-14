@@ -1,0 +1,36 @@
+# Thermal Analysis Export
+# Generated on,2025-08-15 00:43:45
+
+Original Image,flir_20250428T191100.jpg
+
+# Global Thermal Parameters
+Emissivity,0.134
+ObjectDistance,3.469
+ReflectedApparentTemperature,19.999994
+PlanckR1,17959.80078125
+PlanckR2,0.012500000186
+PlanckB,1435.0
+PlanckF,1.0
+PlanckO,-1957.0
+AtmosphericTemperature,20.0
+AtmosphericTransmission,0.95
+RelativeHumidity,0.5
+
+# Global Temperature Statistics
+global_temp_min_celsius,-156.38
+global_temp_max_celsius,52.92
+global_temp_mean_celsius,7.31
+global_temp_median_celsius,8.08
+global_temp_std_dev_celsius,20.40
+total_pixel_count,203807.00
+
+# Visualization Settings
+Color Palette,Pink
+Palette Inverted,True
+Overlay Mode,False
+
+# ROI Analysis Data
+roi_name,roi_type,emissivity,temp_min_celsius,temp_max_celsius,temp_mean_celsius,temp_median_celsius,temp_std_dev_celsius,pixel_count
+ciao,RectROI,0.950,6.17,22.63,16.91,19.09,4.77,3264
+mamma,SpotROI,0.950,4.80,23.89,14.44,16.10,5.94,2384
+guarda,PolygonROI,0.950,-1.93,11.95,1.38,1.21,1.74,2760

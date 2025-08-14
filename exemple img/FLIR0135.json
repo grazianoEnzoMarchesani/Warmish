@@ -1,14 +1,14 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.98,
+    "Emissivity": 0.134,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5,
     "ObjectDistance": 3.469,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "BrBG",
+  "palette": "Pink",
   "palette_inverted": true,
   "overlay_settings": {
     "scale": 0.7371037717330103,
@@ -20,28 +20,51 @@
   "roi_label_settings": {
     "name": true,
     "emissivity": true,
-    "min": true,
-    "max": true,
+    "min": false,
+    "max": false,
     "avg": false,
-    "median": false
+    "median": true
   },
   "rois": [
     {
       "type": "RectROI",
-      "name": "ROI_1",
+      "name": "ciao",
       "emissivity": 0.95,
-      "x": 150.0,
+      "x": 184.0,
       "y": 152.0,
       "width": 47.73841961852861,
       "height": 67.35694822888283
     },
     {
       "type": "SpotROI",
-      "name": "Spot_1",
+      "name": "mamma",
       "emissivity": 0.95,
-      "x": 44.884488448844905,
-      "y": 105.74257425742576,
-      "radius": 10.0
+      "x": 311.04252659598393,
+      "y": 164.59816008848844,
+      "radius": 27.656675749318808
+    },
+    {
+      "type": "PolygonROI",
+      "name": "guarda",
+      "emissivity": 0.95,
+      "points": [
+        [
+          39.01907356948229,
+          137.00272479564035
+        ],
+        [
+          102.45231607629428,
+          57.22070844686648
+        ],
+        [
+          135.80381471389646,
+          102.34332425068119
+        ],
+        [
+          39.01907356948229,
+          137.00272479564035
+        ]
+      ]
     }
   ]
 }

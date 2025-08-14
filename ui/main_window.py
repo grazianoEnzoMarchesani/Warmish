@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QLabel, QTextEdit, QTabWidget,
     QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QCheckBox, QFileDialog, QMessageBox, QSlider, QSpinBox,
-    QDoubleSpinBox, QComboBox, QApplication, QToolBar
+    QDoubleSpinBox, QComboBox, QApplication, QToolBar, QListWidget,
+    QProgressBar, QListWidgetItem
 )
 from PySide6.QtCore import Qt, QPointF, QRectF, QSignalBlocker, QTimer
 from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QAction, QKeySequence
@@ -56,7 +57,8 @@ class ThermalAnalyzerNG(QMainWindow):
         self.roi_controller = ROIController(self.thermal_engine)
         self.settings_manager = SettingsManager()
         
-        # Initialize UI data storage
+        # Initialize data storage and UI storage
+        self._init_data_storage()
         self._init_ui_storage()
         
         # Setup UI components
@@ -72,6 +74,10 @@ class ThermalAnalyzerNG(QMainWindow):
         self._connect_ui_signals()
         
         print("Main window initialization completed.")
+
+    def _init_data_storage(self):
+        """Initialize data storage variables."""
+        self.current_image_path = None
 
     def _init_ui_storage(self):
         """Initialize UI-specific data storage variables."""
@@ -939,44 +945,88 @@ class ThermalAnalyzerNG(QMainWindow):
         self.roi_table_layout.addLayout(label_opts_layout)
         
     def _setup_batch_export_tab(self):
-        """Setup the batch processing and export tab."""
+        """Setup the enhanced batch processing and export tab."""
         self.tab_batch = QWidget()
         self.tab_batch_layout = QVBoxLayout(self.tab_batch)
         self.tab_batch_layout.setContentsMargins(16, 16, 16, 16)
         self.tab_batch_layout.setSpacing(12)
         
-        # Batch processing section
-        batch_group = QGroupBox("Batch Processing")
+        # Preset Configuration Section
+        preset_group = QGroupBox("Preset Configuration")
+        preset_layout = QVBoxLayout(preset_group)
+        
+        # Preset loading section
+        preset_controls_layout = QHBoxLayout()
+        self.preset_file_label = QLabel("No preset loaded")
+        self.preset_file_label.setStyleSheet("color: #888; font-style: italic;")
+        self.btn_load_preset = QPushButton("Load Preset JSON")
+        self.btn_load_preset.setStyleSheet("background-color: #2196F3; color: white;")
+        
+        preset_controls_layout.addWidget(self.preset_file_label)
+        preset_controls_layout.addStretch()
+        preset_controls_layout.addWidget(self.btn_load_preset)
+        preset_layout.addLayout(preset_controls_layout)
+        
+        # Preset options
+        self.cb_thermal_params = QCheckBox("Apply Thermal Parameters")
+        self.cb_analysis_areas = QCheckBox("Apply Analysis Areas (ROIs)")
+        self.cb_color_palette = QCheckBox("Apply Color Palette")
+        
+        self.cb_thermal_params.setChecked(True)
+        self.cb_analysis_areas.setChecked(True)
+        self.cb_color_palette.setChecked(True)
+        
+        preset_layout.addWidget(self.cb_thermal_params)
+        preset_layout.addWidget(self.cb_analysis_areas)
+        preset_layout.addWidget(self.cb_color_palette)
+        
+        self.tab_batch_layout.addWidget(preset_group)
+        
+        # Batch Images Section
+        batch_group = QGroupBox("Batch Images")
         batch_layout = QVBoxLayout(batch_group)
         
-        self.batch_file_label = QLabel(
-            "Drag & drop images or click to browse\n"
-            "Supports .FLIR, .JPG (with thermal data), .PNG"
+        # Image selection controls
+        image_controls_layout = QHBoxLayout()
+        self.btn_select_images = QPushButton("Select Images")
+        self.btn_select_images.setStyleSheet("background-color: #4CAF50; color: white;")
+        self.btn_clear_images = QPushButton("Clear List")
+        self.btn_clear_images.setStyleSheet("background-color: #F44336; color: white;")
+        
+        image_controls_layout.addWidget(self.btn_select_images)
+        image_controls_layout.addWidget(self.btn_clear_images)
+        image_controls_layout.addStretch()
+        
+        batch_layout.addLayout(image_controls_layout)
+        
+        # Images list
+        self.images_list = QListWidget()
+        self.images_list.setMaximumHeight(120)
+        self.images_list.setStyleSheet(
+            "QListWidget { border: 1px solid #ccc; background-color: #f9f9f9; }"
+            "QListWidget::item { padding: 4px; }"
+            "QListWidget::item:selected { background-color: #e3f2fd; }"
         )
-        self.batch_file_label.setAlignment(Qt.AlignCenter)
-        self.batch_file_label.setStyleSheet(
-            "border: 1px dashed #888; padding: 32px; color: #ccc;"
-        )
-        batch_layout.addWidget(self.batch_file_label)
+        batch_layout.addWidget(self.images_list)
         
-        # Batch processing options
-        self.cb_thermal_params = QCheckBox("Thermal Parameters")
-        self.cb_analysis_areas = QCheckBox("Analysis Areas (same positions)")
-        self.cb_color_palette = QCheckBox("Color Palette")
-        
-        batch_layout.addWidget(self.cb_thermal_params)
-        batch_layout.addWidget(self.cb_analysis_areas)
-        batch_layout.addWidget(self.cb_color_palette)
-        
-        self.btn_process_batch = QPushButton("Process Selected Images")
+        # Processing controls
+        process_layout = QHBoxLayout()
+        self.btn_process_batch = QPushButton("Process All Images")
         self.btn_process_batch.setStyleSheet(
             "background-color: #a259f7; color: white; font-weight: bold;"
         )
-        batch_layout.addWidget(self.btn_process_batch)
+        self.btn_process_batch.setEnabled(False)  # Disabled until images and preset are loaded
+        
+        self.batch_progress = QProgressBar()
+        self.batch_progress.setVisible(False)
+        
+        process_layout.addWidget(self.btn_process_batch)
+        batch_layout.addLayout(process_layout)
+        batch_layout.addWidget(self.batch_progress)
         
         self.tab_batch_layout.addWidget(batch_group)
         
-        # Export section
+        # Export section (unchanged)
         export_group = QGroupBox("Export Options")
         export_layout = QVBoxLayout(export_group)
         
@@ -1000,6 +1050,10 @@ class ThermalAnalyzerNG(QMainWindow):
         
         self.tab_batch_layout.addWidget(export_group)
         self.sidebar_tabs.addTab(self.tab_batch, "Batch & Export")
+        
+        # Initialize batch processing data
+        self.batch_images = []
+        self.preset_data = None
         
     def _init_data_storage(self):
         """Initialize data storage variables."""
@@ -2020,82 +2074,30 @@ class ThermalAnalyzerNG(QMainWindow):
         Load ROI definitions from JSON data.
         
         This method reconstructs ROI objects from their JSON representation
-        and creates the corresponding visual items in the image view. It
-        supports all ROI types (rectangular, spot, and polygon) and handles
-        color assignment and positioning.
+        using the ROI controller for proper management and analysis.
         
         Args:
             rois_data (list): List of ROI dictionaries from JSON data.
         """
-        # Clear existing ROIs first
-        self.clear_all_rois()
+        if not hasattr(self, 'roi_controller') or not self.roi_controller:
+            print("ROI controller not available")
+            return
         
-        from analysis.roi_models import RectROI, SpotROI, PolygonROI
-        from ui.roi_items import RectROIItem, SpotROIItem, PolygonROIItem
-        from PySide6.QtGui import QColor
-        
-        for roi_data in rois_data:
-            try:
-                # Extract common ROI properties
-                roi_type = roi_data.get("type", "")
-                roi_name = roi_data.get("name", "ROI")
-                roi_emissivity = roi_data.get("emissivity", 0.95)
-                roi_model = None
-                roi_item = None
-                
-                # Create ROI based on type
-                if roi_type == "RectROI":
-                    x = roi_data.get("x", 0)
-                    y = roi_data.get("y", 0)
-                    width = roi_data.get("width", 50)
-                    height = roi_data.get("height", 50)
-                    
-                    roi_model = RectROI(x=x, y=y, width=width, height=height, name=roi_name)
-                    roi_model.emissivity = roi_emissivity
-                    
-                    if hasattr(self, 'image_view') and hasattr(self.image_view, '_thermal_item'):
-                        roi_item = RectROIItem(roi_model, parent=self.image_view._thermal_item)
-                
-                elif roi_type == "SpotROI":
-                    x = roi_data.get("x", 0)
-                    y = roi_data.get("y", 0)
-                    radius = roi_data.get("radius", 5)  # Default radius for spot ROI
-                    
-                    roi_model = SpotROI(x=x, y=y, radius=radius, name=roi_name)
-                    roi_model.emissivity = roi_emissivity
-                    
-                    if hasattr(self, 'image_view') and hasattr(self.image_view, '_thermal_item'):
-                        roi_item = SpotROIItem(roi_model, parent=self.image_view._thermal_item)
-                
-                elif roi_type == "PolygonROI":
-                    points = roi_data.get("points", [(0, 0), (50, 0), (50, 50), (0, 50)])
-                    
-                    roi_model = PolygonROI(points=points, name=roi_name)
-                    roi_model.emissivity = roi_emissivity
-                    
-                    if hasattr(self, 'image_view') and hasattr(self.image_view, '_thermal_item'):
-                        roi_item = PolygonROIItem(roi_model, parent=self.image_view._thermal_item)
-                
-                # Add ROI to collections if successfully created
-                if roi_model and roi_item:
-                    self.rois.append(roi_model)
-                    self.roi_items[roi_model.id] = roi_item
-                    
-                    # Assign distinct color based on ROI index
-                    hue = (len(self.rois) * 55) % 360  # Distribute hues around color wheel
-                    color = QColor.fromHsv(hue, 220, 255)
-                    roi_model.color = color
-                    roi_item.set_color(color)
-                    roi_item.setZValue(10)  # Ensure ROIs appear above image
-                    
-                    print(f"ROI loaded: {roi_model}")
+        try:
+            # Clear existing ROIs first
+            self.roi_controller.clear_all_rois()
             
-            except Exception as e:
-                print(f"Error loading ROI: {e}")
+            # Import ROIs using the controller
+            imported_count = self.roi_controller.import_roi_data(rois_data)
+            print(f"Loaded {imported_count} ROIs from settings")
+            
+            # Update analysis if temperature data is available
+            if hasattr(self, 'thermal_engine') and self.thermal_engine.thermal_data is not None:
+                self.roi_controller.update_all_analyses()
                 
-        # Update analysis after loading all ROIs
-        self.update_roi_analysis()
-    
+        except Exception as e:
+            print(f"Error loading ROIs: {e}")
+
     def connect_auto_save_signals(self):
         """
         Connect all UI control signals to auto-save functionality.
@@ -2150,6 +2152,12 @@ class ThermalAnalyzerNG(QMainWindow):
         
         # Connect export button
         self.btn_export_current.clicked.connect(self.export_current_analysis)
+        
+        # Connect batch processing signals
+        self.btn_load_preset.clicked.connect(self.load_preset_json)
+        self.btn_select_images.clicked.connect(self.select_batch_images)
+        self.btn_clear_images.clicked.connect(self.clear_batch_images)
+        self.btn_process_batch.clicked.connect(self.process_batch_with_preset)
         
         # Connect auto-save signals
         self.connect_auto_save_signals()
@@ -2947,3 +2955,395 @@ class ThermalAnalyzerNG(QMainWindow):
         self.update_thermal_display()
         self.update_legend()
         self.display_images()
+
+    def load_preset_json(self):
+        """
+        Load a preset JSON file containing thermal analysis configuration.
+        
+        This method allows users to select a JSON file that contains saved
+        thermal parameters, ROI definitions, and color palette settings
+        that will be applied to all images in the batch processing.
+        """
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Load Preset JSON", 
+            "", 
+            "JSON Files (*.json)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                self.preset_data = json.load(f)
+            
+            # Update UI to show loaded preset
+            preset_name = os.path.basename(file_path)
+            self.preset_file_label.setText(f"Loaded: {preset_name}")
+            self.preset_file_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+            
+            # Validate preset data
+            preset_info = self._validate_preset_data(self.preset_data)
+            
+            # Update checkboxes based on available data
+            self.cb_thermal_params.setEnabled(preset_info['has_thermal_params'])
+            self.cb_analysis_areas.setEnabled(preset_info['has_rois'])
+            self.cb_color_palette.setEnabled(preset_info['has_palette'])
+            
+            # Enable processing if we have both preset and images
+            self._update_process_button_state()
+            
+            QMessageBox.information(
+                self, 
+                "Preset Loaded", 
+                f"Successfully loaded preset:\n\n"
+                f"• Thermal Parameters: {'✓' if preset_info['has_thermal_params'] else '✗'}\n"
+                f"• ROI Definitions: {'✓' if preset_info['has_rois'] else '✗'} "
+                f"({preset_info['roi_count']} ROIs)\n"
+                f"• Color Palette: {'✓' if preset_info['has_palette'] else '✗'}\n"
+                f"• Overlay Settings: {'✓' if preset_info['has_overlay'] else '✗'}"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                "Error Loading Preset", 
+                f"Failed to load preset file:\n{str(e)}"
+            )
+            self.preset_data = None
+            self.preset_file_label.setText("Error loading preset")
+            self.preset_file_label.setStyleSheet("color: #F44336; font-style: italic;")
+
+    def _validate_preset_data(self, preset_data):
+        """
+        Validate preset data and return information about available components.
+        
+        Args:
+            preset_data (dict): The loaded preset data
+            
+        Returns:
+            dict: Information about available preset components
+        """
+        info = {
+            'has_thermal_params': False,
+            'has_rois': False,
+            'has_palette': False,
+            'has_overlay': False,
+            'roi_count': 0
+        }
+        
+        if 'thermal_parameters' in preset_data:
+            info['has_thermal_params'] = True
+            
+        if 'rois' in preset_data and isinstance(preset_data['rois'], list):
+            info['has_rois'] = len(preset_data['rois']) > 0
+            info['roi_count'] = len(preset_data['rois'])
+            
+        if 'palette' in preset_data:
+            info['has_palette'] = True
+            
+        if 'overlay_settings' in preset_data:
+            info['has_overlay'] = True
+            
+        return info
+
+    def select_batch_images(self):
+        """
+        Select multiple thermal images for batch processing.
+        
+        This method opens a file dialog allowing users to select multiple
+        FLIR thermal images that will be processed with the loaded preset.
+        """
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select Thermal Images for Batch Processing",
+            "",
+            "FLIR Images (*.jpg *.jpeg);;All Images (*.jpg *.jpeg *.png)"
+        )
+        
+        if not file_paths:
+            return
+        
+        # Add new images to the list (avoid duplicates)
+        added_count = 0
+        for file_path in file_paths:
+            if file_path not in self.batch_images:
+                self.batch_images.append(file_path)
+                
+                # Add to UI list
+                item = QListWidgetItem(os.path.basename(file_path))
+                item.setToolTip(file_path)  # Full path as tooltip
+                self.images_list.addItem(item)
+                added_count += 1
+        
+        # Update UI
+        self._update_process_button_state()
+        
+        if added_count > 0:
+            QMessageBox.information(
+                self,
+                "Images Selected",
+                f"Added {added_count} images to batch processing queue.\n"
+                f"Total images: {len(self.batch_images)}"
+            )
+
+    def clear_batch_images(self):
+        """Clear all selected images from the batch processing list."""
+        if not self.batch_images:
+            return
+        
+        reply = QMessageBox.question(
+            self,
+            "Clear Images",
+            f"Remove all {len(self.batch_images)} images from the batch processing list?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.batch_images.clear()
+            self.images_list.clear()
+            self._update_process_button_state()
+
+    def _update_process_button_state(self):
+        """Update the process button state based on preset and images availability."""
+        has_preset = self.preset_data is not None
+        has_images = len(self.batch_images) > 0
+        
+        self.btn_process_batch.setEnabled(has_preset and has_images)
+        
+        if has_preset and has_images:
+            self.btn_process_batch.setText(f"Process {len(self.batch_images)} Images")
+        else:
+            self.btn_process_batch.setText("Process All Images")
+
+    def process_batch_with_preset(self):
+        """
+        Process all selected images applying the loaded preset configuration.
+        
+        This method iterates through all selected images, loads each one,
+        applies the preset configuration (thermal parameters, ROIs, palette),
+        and exports the analysis results.
+        """
+        if not self.preset_data or not self.batch_images:
+            QMessageBox.warning(
+                self,
+                "Missing Data",
+                "Please load a preset JSON file and select images before processing."
+            )
+            return
+        
+        # Ask user for output directory
+        output_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Output Directory for Batch Processing"
+        )
+        
+        if not output_dir:
+            return
+        
+        # Confirm processing
+        reply = QMessageBox.question(
+            self,
+            "Confirm Batch Processing",
+            f"Process {len(self.batch_images)} images with the loaded preset?\n\n"
+            f"Output directory: {output_dir}\n\n"
+            f"This will apply:\n"
+            f"• Thermal Parameters: {'✓' if self.cb_thermal_params.isChecked() else '✗'}\n"
+            f"• Analysis Areas (ROIs): {'✓' if self.cb_analysis_areas.isChecked() else '✗'}\n"
+            f"• Color Palette: {'✓' if self.cb_color_palette.isChecked() else '✗'}",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # Initialize progress
+        self.batch_progress.setVisible(True)
+        self.batch_progress.setMaximum(len(self.batch_images))
+        self.batch_progress.setValue(0)
+        
+        # Disable UI during processing
+        self.btn_process_batch.setEnabled(False)
+        self.btn_select_images.setEnabled(False)
+        self.btn_load_preset.setEnabled(False)
+        
+        processed_count = 0
+        failed_images = []
+        
+        try:
+            for i, image_path in enumerate(self.batch_images):
+                try:
+                    # Update progress
+                    self.batch_progress.setValue(i)
+                    QApplication.processEvents()  # Keep UI responsive
+                    
+                    print(f"Processing image {i+1}/{len(self.batch_images)}: {os.path.basename(image_path)}")
+                    
+                    # Process single image with preset
+                    success = self._process_single_image_with_preset(image_path, output_dir)
+                    
+                    if success:
+                        processed_count += 1
+                    else:
+                        failed_images.append(os.path.basename(image_path))
+                        
+                except Exception as e:
+                    print(f"Error processing {image_path}: {e}")
+                    failed_images.append(os.path.basename(image_path))
+            
+            # Complete progress
+            self.batch_progress.setValue(len(self.batch_images))
+            
+            # Show results
+            result_msg = f"Batch processing completed!\n\n"
+            result_msg += f"Successfully processed: {processed_count}/{len(self.batch_images)} images\n"
+            result_msg += f"Output directory: {output_dir}"
+            
+            if failed_images:
+                result_msg += f"\n\nFailed images:\n• " + "\n• ".join(failed_images)
+                QMessageBox.warning(self, "Batch Processing Complete", result_msg)
+            else:
+                QMessageBox.information(self, "Batch Processing Complete", result_msg)
+                
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Batch Processing Error", 
+                f"An error occurred during batch processing:\n{str(e)}"
+            )
+        finally:
+            # Re-enable UI
+            self.batch_progress.setVisible(False)
+            self.btn_process_batch.setEnabled(True)
+            self.btn_select_images.setEnabled(True)
+            self.btn_load_preset.setEnabled(True)
+
+    def _process_single_image_with_preset(self, image_path, output_dir):
+        """
+        Process a single image with the loaded preset.
+        
+        Args:
+            image_path (str): Path to the thermal image
+            output_dir (str): Directory for output files
+            
+        Returns:
+            bool: True if processing was successful
+        """
+        try:
+            # Store current state to restore later
+            original_image_path = self.current_image_path
+            
+            # Load the thermal image
+            if not self.thermal_engine.load_thermal_image(image_path):
+                print(f"Failed to load thermal data from {image_path}")
+                return False
+            
+            # Apply preset configuration
+            self._apply_preset_to_current_image()
+            
+            # Generate output filename base
+            image_name = os.path.splitext(os.path.basename(image_path))[0]
+            output_base = os.path.join(output_dir, image_name)
+            
+            # Export the analysis
+            return self._export_image_analysis(output_base)
+            
+        except Exception as e:
+            print(f"Error processing {image_path}: {e}")
+            return False
+
+    def _apply_preset_to_current_image(self):
+        """Apply the loaded preset configuration to the currently loaded image."""
+        if not self.preset_data:
+            return
+        
+        try:
+            # Disable auto-save during preset application
+            self._ignore_auto_save = True
+            
+            # Apply thermal parameters
+            if self.cb_thermal_params.isChecked() and "thermal_parameters" in self.preset_data:
+                for param, value in self.preset_data["thermal_parameters"].items():
+                    if param in self.param_inputs:
+                        self.param_inputs[param].setText(str(value))
+            
+            # Apply color palette
+            if self.cb_color_palette.isChecked() and "palette" in self.preset_data:
+                palette_name = self.preset_data["palette"]
+                palette_index = self.palette_combo.findText(palette_name)
+                if palette_index >= 0:
+                    self.palette_combo.setCurrentIndex(palette_index)
+                    self.selected_palette = palette_name
+            
+            # Apply palette inversion
+            if self.cb_color_palette.isChecked() and "palette_inverted" in self.preset_data:
+                self.palette_inverted = self.preset_data["palette_inverted"]
+            
+            # Apply ROIs using the ROI controller (FIX: Use roi_controller instead of direct loading)
+            if self.cb_analysis_areas.isChecked() and "rois" in self.preset_data:
+                # Clear existing ROIs first
+                self.roi_controller.clear_all_rois()
+                
+                # Import ROIs using the controller
+                imported_count = self.roi_controller.import_roi_data(self.preset_data["rois"])
+                print(f"Imported {imported_count} ROIs from preset")
+            
+            # Calculate temperatures with new parameters
+            thermal_params = self.get_current_thermal_parameters()
+            if self.thermal_engine.calculate_temperatures(thermal_params):
+                # Update ROI analysis with new temperatures
+                self.roi_controller.update_all_analyses()
+            
+        except Exception as e:
+            print(f"Error applying preset: {e}")
+        finally:
+            # Re-enable auto-save
+            self._ignore_auto_save = False
+
+    def _export_image_analysis(self, base_path):
+        """
+        Export analysis for a single image.
+        
+        Args:
+            base_path (str): Base path for output files (without extension)
+            
+        Returns:
+            bool: True if export was successful
+        """
+        try:
+            exported_files = []
+            
+            # Export thermal image (clean)
+            thermal_path = f"{base_path}_thermal.png"
+            if self._export_thermal_image(thermal_path):
+                exported_files.append(thermal_path)
+            
+            # Export thermal image with ROIs
+            thermal_roi_path = f"{base_path}_thermal_with_rois.png"
+            if self._export_thermal_with_rois(thermal_roi_path):
+                exported_files.append(thermal_roi_path)
+            
+            # Export visible image (if available)
+            visible_path = f"{base_path}_visible.png"
+            if self._export_visible_image(visible_path):
+                exported_files.append(visible_path)
+            
+            # Export overlay image
+            overlay_path = f"{base_path}_overlay.png"
+            if self._export_overlay_image(overlay_path):
+                exported_files.append(overlay_path)
+            
+            # Export data CSV
+            csv_path = f"{base_path}_data.csv"
+            if self._export_analysis_csv(csv_path):
+                exported_files.append(csv_path)
+            
+            print(f"Exported {len(exported_files)} files for {os.path.basename(base_path)}")
+            return len(exported_files) > 0
+            
+        except Exception as e:
+            print(f"Error exporting analysis for {base_path}: {e}")
+            return False
