@@ -27,24 +27,25 @@ from PySide6.QtWidgets import (
     QCheckBox, QFileDialog, QMessageBox, QSlider, QSpinBox,
     QDoubleSpinBox, QComboBox, QApplication, QToolBar
 )
-from PySide6.QtCore import Qt, QPointF, QRectF, QSignalBlocker
+from PySide6.QtCore import Qt, QPointF, QRectF, QSignalBlocker, QTimer
 from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QAction, QKeySequence
 
 from ui.widgets.image_graphics_view import ImageGraphicsView
 from ui.widgets.color_bar_legend import ColorBarLegend
 from constants import *
 
+from core.thermal_engine import ThermalEngine
+from core.roi_controller import ROIController
+from core.settings_manager import SettingsManager
+
 
 class ThermalAnalyzerNG(QMainWindow):
     """
     Main window for the Thermal Analyzer NG application.
     
-    Provides a comprehensive interface for thermal image analysis including:
-    - FLIR thermal image loading and processing
-    - Temperature calculation with environmental corrections
-    - ROI (Region of Interest) creation and analysis
-    - Image overlay capabilities
-    - Batch processing and export functionality
+    This class now acts as an orchestrator, coordinating interactions between
+    the UI components and the business logic classes (ThermalEngine, 
+    ROIController, SettingsManager).
     """
     
     def __init__(self, parent=None):
@@ -54,23 +55,388 @@ class ThermalAnalyzerNG(QMainWindow):
         self.setWindowTitle("Thermal Analyzer NG")
         self.setMinimumSize(1200, 800)
         
-        # Initialize data storage
-        self._init_data_storage()
+        # Initialize business logic components
+        self.thermal_engine = ThermalEngine()
+        self.roi_controller = ROIController(self.thermal_engine)
+        self.settings_manager = SettingsManager()
         
-        # Setup menu bar and toolbar FIRST
+        # Initialize UI data storage
+        self._init_ui_storage()
+        
+        # Setup UI components
         self._setup_menu_bar()
         self._setup_toolbar()
-        
-        # Setup main UI layout
         self._setup_main_layout()
-        
-        # Setup sidebar with tabs
         self._setup_sidebar_tabs()
         
-        # Connect signals after UI is created
+        # Connect business logic signals
+        self._connect_business_logic_signals()
+        
+        # Connect UI signals
         self._connect_ui_signals()
         
         print("Main window initialization completed.")
+
+    def _init_ui_storage(self):
+        """Initialize UI-specific data storage variables."""
+        # UI state variables
+        self.roi_items = {}
+        self.current_drawing_tool = None
+        self._updating_roi_table = False
+        
+        # Temperature range (for UI display)
+        self.temp_min = 0.0
+        self.temp_max = 100.0
+        self.base_pixmap = None
+        self.base_pixmap_visible = None
+        
+        # Palette settings
+        self.selected_palette = "Iron"
+        self.palette_inverted = False
+        
+        # Overlay settings
+        self.overlay_mode = False
+        self.overlay_alpha = 0.5
+        self.overlay_scale = 1.0
+        self.overlay_offset_x = 0.0
+        self.overlay_offset_y = 0.0
+        self.overlay_blend_mode = "Normal"
+        
+        # ROI label settings
+        self.roi_label_settings = {
+            "name": True,
+            "emissivity": True,
+            "min": True,
+            "max": True,
+            "avg": True,
+            "median": False,
+        }
+
+    def _connect_business_logic_signals(self):
+        """Connect signals from business logic components."""
+        # ThermalEngine signals
+        self.thermal_engine.data_loaded.connect(self.on_thermal_data_loaded)
+        self.thermal_engine.temperatures_calculated.connect(self.on_temperatures_calculated)
+        self.thermal_engine.error_occurred.connect(self.on_thermal_error)
+        
+        # ROIController signals
+        self.roi_controller.roi_added.connect(self.on_roi_added)
+        self.roi_controller.roi_removed.connect(self.on_roi_removed)
+        self.roi_controller.roi_modified.connect(self.on_roi_modified)
+        self.roi_controller.rois_cleared.connect(self.on_rois_cleared)
+        self.roi_controller.analysis_updated.connect(self.on_roi_analysis_updated)
+        
+        # SettingsManager signals
+        self.settings_manager.settings_loaded.connect(self.on_settings_loaded)
+        self.settings_manager.settings_saved.connect(self.on_settings_saved)
+        self.settings_manager.error_occurred.connect(self.on_settings_error)
+
+    def open_image(self):
+        """Open and load a FLIR thermal image file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select FLIR Image", "", "JPEG Images (*.jpg *.jpeg)"
+        )
+        if not file_path: 
+            return
+            
+        # Reset application state
+        self.reset_application_state()
+        
+        # Update window title
+        self.setWindowTitle(f"Warmish - {file_path.split('/')[-1]}")
+        
+        # Load thermal data using engine
+        if self.thermal_engine.load_thermal_image(file_path):
+            # Set image path for settings
+            self.settings_manager.set_current_image_path(file_path)
+            
+            # Load saved settings
+            self.settings_manager.load_settings()
+        else:
+            QMessageBox.critical(self, "Error", "Failed to load thermal image")
+
+    def on_thermal_data_loaded(self):
+        """Handle thermal data loaded event."""
+        print("Thermal data loaded successfully")
+        
+        # Populate thermal parameters from metadata
+        self.populate_params_from_engine()
+        
+        # Calculate initial temperatures
+        thermal_params = self.get_current_thermal_parameters()
+        self.thermal_engine.calculate_temperatures(thermal_params)
+
+    def on_temperatures_calculated(self):
+        """Handle temperatures calculated event."""
+        print("Temperatures calculated successfully")
+        
+        # Update temperature range for UI
+        self.temp_min = self.thermal_engine.temp_min
+        self.temp_max = self.thermal_engine.temp_max
+        
+        # Update visualization
+        self.update_thermal_display()
+        self.update_legend()
+        self.display_images()
+
+    def populate_params_from_engine(self):
+        """Populate UI thermal parameter inputs from engine metadata."""
+        if not self.thermal_engine.metadata:
+            return
+            
+        thermal_params = self.thermal_engine.get_thermal_parameters_from_metadata()
+        
+        # Update UI inputs
+        for key, value in thermal_params.items():
+            if key in self.param_inputs:
+                line_edit = self.param_inputs[key]
+                
+                if value is not None:
+                    # Format appropriately based on parameter type
+                    if key in ["PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO"]:
+                        line_edit.setText(f"{float(value):.12f}")
+                    elif key in ["Emissivity", "ReflectedApparentTemperature", "AtmosphericTransmission"]:
+                        line_edit.setText(f"{float(value):.6f}")
+                    else:
+                        line_edit.setText(f"{float(value):.4f}")
+                    
+                    line_edit.setStyleSheet("")
+                    line_edit.setToolTip("")
+                else:
+                    line_edit.setText("N/A")
+                    line_edit.setStyleSheet("background-color: #f8d7da;")
+                    line_edit.setToolTip("Parameter not available in EXIF metadata")
+
+    def get_current_thermal_parameters(self) -> dict:
+        """Get current thermal parameters from UI inputs."""
+        parameters = {}
+        
+        for key, line_edit in self.param_inputs.items():
+            text = line_edit.text().strip()
+            if text and text != "N/A":
+                try:
+                    parameters[key] = float(text)
+                except ValueError:
+                    pass  # Skip invalid values
+                    
+        return parameters
+
+    def recalculate_and_update_view(self):
+        """Recalculate temperatures and update the complete view."""
+        thermal_params = self.get_current_thermal_parameters()
+        
+        if self.thermal_engine.calculate_temperatures(thermal_params):
+            # Update ROI analysis with new temperatures
+            self.roi_controller.update_all_analyses()
+            
+            # Auto-save settings
+            self.auto_save_settings()
+
+    def update_thermal_display(self):
+        """Update the thermal image display with current palette settings."""
+        pixmap = self.thermal_engine.create_colored_pixmap(
+            self.selected_palette, self.palette_inverted
+        )
+        
+        if not pixmap.isNull():
+            self.base_pixmap = pixmap
+            self.display_thermal_image()
+
+    def create_rect_roi(self, thermal_rect: QRectF):
+        """Create a rectangular ROI from the image view signal.
+        
+        Args:
+            thermal_rect (QRectF): Rectangle in thermal image coordinates.
+        """
+        # Use ROI controller to create the ROI
+        roi_model = self.roi_controller.create_rect_roi(
+            x=thermal_rect.x(),
+            y=thermal_rect.y(),
+            width=thermal_rect.width(),
+            height=thermal_rect.height()
+        )
+        
+        print(f"Created rectangular ROI: {roi_model.name}")
+
+    def create_spot_roi(self, center_point: QPointF, radius: float):
+        """Create a spot ROI from the image view signal.
+        
+        Args:
+            center_point (QPointF): Center point in thermal image coordinates.
+            radius (float): Radius in thermal pixels.
+        """
+        # Use ROI controller to create the ROI
+        roi_model = self.roi_controller.create_spot_roi(
+            x=center_point.x(),
+            y=center_point.y(),
+            radius=radius
+        )
+        
+        print(f"Created spot ROI: {roi_model.name}")
+
+    def create_polygon_roi(self, points: list):
+        """Create a polygon ROI from the image view signal.
+        
+        Args:
+            points (list): List of (x, y) coordinate tuples in thermal image space.
+        """
+        # Use ROI controller to create the ROI
+        roi_model = self.roi_controller.create_polygon_roi(points=points)
+        
+        print(f"Created polygon ROI: {roi_model.name}")
+
+    def on_roi_added(self, roi_model):
+        """Handle ROI added event from controller."""
+        from ui.roi_items import RectROIItem, SpotROIItem, PolygonROIItem
+        
+        print(f"ROI added: {roi_model.name}")
+        
+        # Create appropriate visual item
+        roi_item = None
+        if roi_model.__class__.__name__ == "RectROI":
+            roi_item = RectROIItem(roi_model, parent=self.image_view._thermal_item)
+        elif roi_model.__class__.__name__ == "SpotROI":
+            roi_item = SpotROIItem(roi_model, parent=self.image_view._thermal_item)
+        elif roi_model.__class__.__name__ == "PolygonROI":
+            roi_item = PolygonROIItem(roi_model, parent=self.image_view._thermal_item)
+        
+        if roi_item:
+            # Setup visual properties
+            roi_item.set_color(roi_model.color)
+            roi_item.setZValue(10)
+            
+            # Register in UI collection
+            self.roi_items[roi_model.id] = roi_item
+            
+            # Update table
+            self.update_roi_table()
+            
+            # Auto-save
+            self.auto_save_settings()
+
+    def auto_save_settings(self):
+        """Automatically save current settings if enabled."""
+        if not self.settings_manager.is_auto_save_enabled():
+            return
+            
+        thermal_params = self.get_current_thermal_parameters()
+        palette_settings = {
+            "palette": self.selected_palette,
+            "inverted": self.palette_inverted
+        }
+        overlay_settings = {
+            "scale": self.overlay_scale,
+            "offset_x": self.overlay_offset_x,
+            "offset_y": self.overlay_offset_y,
+            "opacity": int(self.overlay_alpha * 100),
+            "blend_mode": self.overlay_blend_mode
+        }
+        roi_data = self.roi_controller.export_roi_data()
+        
+        self.settings_manager.save_settings(
+            thermal_parameters=thermal_params,
+            palette_settings=palette_settings,
+            overlay_settings=overlay_settings,
+            roi_data=roi_data,
+            roi_label_settings=self.roi_label_settings
+        )
+
+    def on_settings_loaded(self, settings_data):
+        """Handle settings loaded event."""
+        print("Applying loaded settings...")
+        
+        # Disable auto-save during loading
+        self.settings_manager.set_auto_save_enabled(False)
+        
+        try:
+            # Apply thermal parameters
+            if "thermal_parameters" in settings_data:
+                for param, value in settings_data["thermal_parameters"].items():
+                    if param in self.param_inputs:
+                        self.param_inputs[param].setText(str(value))
+                        
+            # Apply palette settings
+            if "palette" in settings_data:
+                palette_name = settings_data["palette"]
+                index = self.palette_combo.findText(palette_name)
+                if index >= 0:
+                    self.palette_combo.setCurrentIndex(index)
+                    self.selected_palette = palette_name
+                    
+            self.palette_inverted = settings_data.get("palette_inverted", False)
+            if hasattr(self, 'invert_palette_button'):
+                self.invert_palette_button.setChecked(self.palette_inverted)
+            
+            # Apply overlay settings
+            overlay = settings_data.get("overlay_settings", {})
+            self.overlay_scale = overlay.get("scale", 1.0)
+            self.overlay_offset_x = overlay.get("offset_x", 0.0)
+            self.overlay_offset_y = overlay.get("offset_y", 0.0)
+            self.overlay_alpha = overlay.get("opacity", 50) / 100.0
+            self.overlay_blend_mode = overlay.get("blend_mode", "Normal")
+            
+            # Update overlay UI controls
+            if hasattr(self, 'scale_spin'):
+                self.scale_spin.blockSignals(True)
+                self.scale_spin.setValue(self.overlay_scale)
+                self.scale_spin.blockSignals(False)
+            
+            if hasattr(self, 'offsetx_spin'):
+                self.offsetx_spin.blockSignals(True)
+                self.offsetx_spin.setValue(int(self.overlay_offset_x))
+                self.offsetx_spin.blockSignals(False)
+            
+            if hasattr(self, 'offsety_spin'):
+                self.offsety_spin.blockSignals(True)
+                self.offsety_spin.setValue(int(self.overlay_offset_y))
+                self.offsety_spin.blockSignals(False)
+            
+            if hasattr(self, 'overlay_alpha_slider'):
+                self.overlay_alpha_slider.blockSignals(True)
+                self.overlay_alpha_slider.setValue(int(self.overlay_alpha * 100))
+                self.overlay_alpha_slider.blockSignals(False)
+            
+            if hasattr(self, 'blend_combo'):
+                blend_index = self.blend_combo.findText(self.overlay_blend_mode)
+                if blend_index >= 0:
+                    self.blend_combo.blockSignals(True)
+                    self.blend_combo.setCurrentIndex(blend_index)
+                    self.blend_combo.blockSignals(False)
+            
+            # Apply ROI label settings
+            roi_labels = settings_data.get("roi_label_settings", {})
+            self.roi_label_settings.update(roi_labels)
+            
+            # Update ROI label checkboxes
+            if hasattr(self, 'cb_label_name'):
+                self.cb_label_name.setChecked(self.roi_label_settings.get("name", True))
+            if hasattr(self, 'cb_label_eps'):
+                self.cb_label_eps.setChecked(self.roi_label_settings.get("emissivity", True))
+            if hasattr(self, 'cb_label_min'):
+                self.cb_label_min.setChecked(self.roi_label_settings.get("min", True))
+            if hasattr(self, 'cb_label_max'):
+                self.cb_label_max.setChecked(self.roi_label_settings.get("max", True))
+            if hasattr(self, 'cb_label_avg'):
+                self.cb_label_avg.setChecked(self.roi_label_settings.get("avg", True))
+            if hasattr(self, 'cb_label_med'):
+                self.cb_label_med.setChecked(self.roi_label_settings.get("median", False))
+            
+            # Update image view with ROI label settings
+            if hasattr(self, 'image_view'):
+                self.image_view.set_roi_label_settings(self.roi_label_settings)
+            
+            # Import ROIs
+            roi_data = settings_data.get("rois", [])
+            if roi_data:
+                self.roi_controller.import_roi_data(roi_data)
+                
+            # Update view with loaded settings
+            if self.thermal_engine.temperature_data is not None:
+                self.update_thermal_display()
+                
+        finally:
+            # Re-enable auto-save
+            self.settings_manager.set_auto_save_enabled(True)
 
     def _setup_menu_bar(self):
         """Setup the application menu bar."""
@@ -689,81 +1055,38 @@ class ThermalAnalyzerNG(QMainWindow):
         loading a new thermal image to ensure clean state.
         """
         try:
-            self._ignore_auto_save = True
+            # Disable auto-save during reset
+            if hasattr(self, 'settings_manager'):
+                self.settings_manager.set_auto_save_enabled(False)
             
             print("Resetting application state...")
             
             # Clear all existing ROIs without confirmation
-            self.clear_all_rois(confirm=False)
+            if hasattr(self, 'roi_controller'):
+                self.roi_controller.clear_all_rois()
+            
+            # Reset thermal engine
+            if hasattr(self, 'thermal_engine'):
+                self.thermal_engine.reset_data()
+            
+            # Reset UI variables
+            self.base_pixmap = None
+            self.base_pixmap_visible = None
+            self.temp_min = 0.0
+            self.temp_max = 100.0
             
             # Reset palette settings
-            self.palette_combo.setCurrentText("Iron")
+            if hasattr(self, 'palette_combo'):
+                self.palette_combo.setCurrentText("Iron")
             self.selected_palette = "Iron"
             self.palette_inverted = False
             
-            # Reset thermal parameters to default values
-            default_values = {
-                "Emissivity": "0.950000",
-                "ObjectDistance": "1.0000",
-                "ReflectedApparentTemperature": "20.0000",
-                "AtmosphericTemperature": "20.0000",
-                "AtmosphericTransmission": "0.950000",
-                "RelativeHumidity": "50.0000",
-                "PlanckR1": "",
-                "PlanckR2": "",
-                "PlanckB": "",
-                "PlanckF": "",
-                "PlanckO": ""
-            }
-            
-            # Apply default values to parameter inputs
-            for param, default_value in default_values.items():
-                if param in self.param_inputs:
-                    self.param_inputs[param].blockSignals(True)
-                    self.param_inputs[param].setText(default_value)
-                    self.param_inputs[param].setStyleSheet("")
-                    self.param_inputs[param].blockSignals(False)
-            
-            # Reset overlay controls to default values
-            if hasattr(self, 'scale_spin'):
-                self.scale_spin.blockSignals(True)
-                self.scale_spin.setValue(1.0)
-                self.scale_spin.blockSignals(False)
-                self.overlay_scale = 1.0
-            
-            if hasattr(self, 'offsetx_spin'):
-                self.offsetx_spin.blockSignals(True)
-                self.offsetx_spin.setValue(0)
-                self.offsetx_spin.blockSignals(False)
-                self.overlay_offset_x = 0.0
-            
-            if hasattr(self, 'offsety_spin'):
-                self.offsety_spin.blockSignals(True)
-                self.offsety_spin.setValue(0)
-                self.offsety_spin.blockSignals(False)
-                self.overlay_offset_y = 0.0
-            
-            if hasattr(self, 'overlay_alpha_slider'):
-                self.overlay_alpha_slider.blockSignals(True)
-                self.overlay_alpha_slider.setValue(50)
-                self.overlay_alpha_slider.blockSignals(False)
-                self.overlay_alpha = 0.5
-            
-            if hasattr(self, 'blend_combo'):
-                self.blend_combo.blockSignals(True)
-                self.blend_combo.setCurrentText("Normal")
-                self.blend_combo.blockSignals(False)
-                self.overlay_blend_mode = "Normal"
-                
-            # Reset overlay mode
-            if hasattr(self, 'action_overlay_view'):
-                self.action_overlay_view.setChecked(False)
-                self.overlay_mode = False
-                
-            # Reset metadata overlay values
-            self.meta_overlay_scale = 1.0
-            self.meta_offset_x = 0.0
-            self.meta_offset_y = 0.0
+            # Reset overlay settings to defaults
+            self.overlay_scale = 1.0
+            self.overlay_offset_x = 0.0
+            self.overlay_offset_y = 0.0
+            self.overlay_alpha = 0.5
+            self.overlay_blend_mode = "Normal"
             
             print("State reset completed")
             
@@ -772,348 +1095,9 @@ class ThermalAnalyzerNG(QMainWindow):
             import traceback
             traceback.print_exc()
         finally:
-            self._ignore_auto_save = False
-
-    def open_image(self):
-        """
-        Open and load a FLIR thermal image file.
-        
-        This method handles the complete process of loading a thermal image:
-        - File selection dialog
-        - EXIF metadata extraction
-        - Raw thermal data extraction
-        - Temperature calculation setup
-        - Visible light image extraction (if available)
-        
-        The method also resets the application state and loads saved settings
-        if a corresponding JSON file exists.
-        """
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select FLIR Image", "", "JPEG Images (*.jpg *.jpeg)"
-        )
-        if not file_path: 
-            return
-            
-        self.current_image_path = file_path
-        self.reset_application_state()
-
-        try:
-            # Update window title with filename
-            self.setWindowTitle(f"Warmish - {file_path.split('/')[-1]}")
-            
-            # Extract EXIF metadata using exiftool
-            with exiftool.ExifTool() as et:
-                json_string = et.execute(b"-json", file_path.encode())
-                self.metadata = json.loads(json_string)[0]
-                self.all_meta_display.setPlainText(
-                    json.dumps(self.metadata, indent=4, default=str)
-                )
-                
-                # Extract overlay alignment parameters from metadata
-                try:
-                    self.meta_overlay_scale = 1/float(self.metadata.get("APP1:Real2IR", 1.0))
-                    self.overlay_scale = self.meta_overlay_scale
-                except Exception:
-                    self.meta_overlay_scale = 1.0
-                    self.overlay_scale = 1.0
-                    
-                try:
-                    self.meta_offset_x = float(self.metadata.get("APP1:OffsetX", 0.0))
-                    self.overlay_offset_x = self.meta_offset_x
-                except Exception:
-                    self.meta_offset_x = 0.0
-                    self.overlay_offset_x = 0.0
-                    
-                try:
-                    self.meta_offset_y = float(self.metadata.get("APP1:OffsetY", 0.0))
-                    self.overlay_offset_y = self.meta_offset_y
-                except Exception:
-                    self.meta_offset_y = 0.0
-                    self.overlay_offset_y = 0.0
-                
-                # Update UI controls with metadata values
-                try:
-                    if hasattr(self, 'scale_spin'):
-                        self.scale_spin.blockSignals(True)
-                        self.scale_spin.setValue(self.overlay_scale)
-                    if hasattr(self, 'offsetx_spin'):
-                        self.offsetx_spin.blockSignals(True)
-                        self.offsetx_spin.setValue(int(round(self.overlay_offset_x)))
-                    if hasattr(self, 'offsety_spin'):
-                        self.offsety_spin.blockSignals(True)
-                        self.offsety_spin.setValue(int(round(self.overlay_offset_y)))
-                finally:
-                    if hasattr(self, 'scale_spin'):
-                        self.scale_spin.blockSignals(False)
-                    if hasattr(self, 'offsetx_spin'):
-                        self.offsetx_spin.blockSignals(False)
-                    if hasattr(self, 'offsety_spin'):
-                        self.offsety_spin.blockSignals(False)
-                    
-            # Populate thermal calculation parameters from metadata
-            self.populate_params()
-
-            # Extract raw thermal data using exiftool
-            command = ["exiftool", "-b", "-RawThermalImage", file_path]
-            result = subprocess.run(command, capture_output=True, check=True)
-            raw_thermal_bytes = result.stdout
-            
-            if not raw_thermal_bytes: 
-                raise ValueError("Binary thermal data not extracted.")
-
-            # Process thermal data based on image type
-            image_type = self.metadata.get("APP1:RawThermalImageType", "Unknown")
-            if image_type == "PNG":
-                # PNG format thermal data
-                self.thermal_data = np.array(Image.open(io.BytesIO(raw_thermal_bytes)))
-                self.thermal_data.byteswap(inplace=True)  # Ensure correct byte order
-            else:
-                # Raw binary thermal data
-                width = self.metadata.get('APP1:RawThermalImageWidth')
-                height = self.metadata.get('APP1:RawThermalImageHeight')
-                if not width or not height: 
-                    raise ValueError("Image dimensions not found.")
-                self.thermal_data = np.frombuffer(
-                    raw_thermal_bytes, dtype=np.uint16
-                ).reshape((height, width))
-
-            # Calculate temperatures and update display
-            self.update_analysis()
-            
-            # Load saved settings from JSON file
-            self.load_settings_from_json()
-            
-            # Connect auto-save signals (only once)
-            if not hasattr(self, '_auto_save_connected'):
-                self.connect_auto_save_signals()
-                self._auto_save_connected = True
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Unable to process file:\n{e}")
-            import traceback
-            traceback.print_exc()
-            
-        # Extract visible light image if available
-        try:
-            command_rgb = ["exiftool", "-b", "-EmbeddedImage", file_path]
-            result_rgb = subprocess.run(command_rgb, capture_output=True, check=True)
-            rgb_bytes = result_rgb.stdout
-            
-            if rgb_bytes:
-                # Process visible light image
-                image_rgb = Image.open(io.BytesIO(rgb_bytes))
-                image_rgb = image_rgb.convert("RGB")
-                self.visible_gray_full = np.array(image_rgb.convert("L"), dtype=np.float32) / 255.0
-                
-                # Convert to QPixmap for display
-                data = image_rgb.tobytes("raw", "RGB")
-                qimage = QImage(data, image_rgb.width, image_rgb.height, image_rgb.width * 3, QImage.Format_RGB888)
-                pixmap = QPixmap.fromImage(qimage)
-                self.base_pixmap_visible = pixmap
-                self.overlay_mode = False
-                self.display_images()
-            else:
-                self.base_pixmap_visible = None
-                self.display_images()
-                
-        except Exception as e:
-            print(f"Error loading visible image: {e}")
-            self.base_pixmap_visible = None
-            self.display_images()
-
-    def recalculate_and_update_view(self):
-        """
-        Recalculate temperature matrix and update the complete view.
-        
-        This method should be used when thermal parameters change, as it
-        performs a full recalculation of the temperature data from raw
-        thermal values using the current Planck and environmental parameters.
-        """
-        if self.thermal_data is None: 
-            return
-            
-        print(">>> Recalculating temperatures and visualisation...")
-        self.calculate_temperature_matrix()
-        self.create_colored_pixmap()
-        self.update_legend()
-        self.display_images()
-        
-        # Update ROI analysis if ROIs exist
-        if len(self.rois) > 0:
-            print("Updating ROI analysis after temperature recalculation...")
-            self.update_roi_analysis()
-
-    def update_view_only(self):
-        """
-        Update only the visualisation using already calculated temperature data.
-        
-        This method should be used when only palette or colour inversion changes,
-        as it doesn't recalculate temperatures but only updates the visual
-        representation of existing data.
-        """
-        if self.temperature_data is None:
-            return
-            
-        print(">>> Updating visualisation only...")
-        self.create_colored_pixmap()
-        self.update_legend()
-        self.display_images()
-        
-    def update_analysis(self):
-        """
-        Legacy method - prefer recalculate_and_update_view().
-        
-        This method is maintained for backward compatibility but new code
-        should use the more explicit recalculate_and_update_view() method.
-        """
-        self.recalculate_and_update_view()
-
-    def populate_params(self):
-        """
-        Populate thermal calculation parameters from EXIF metadata.
-        
-        This method extracts thermal calculation parameters from the loaded
-        image metadata and populates the UI input fields. For missing
-        parameters, appropriate default values are used and highlighted.
-        """
-        if not self.metadata: 
-            return
-            
-        # Default values for missing parameters
-        default_values = {
-            "AtmosphericTemperature": 20.0,
-            "AtmosphericTransmission": 0.95,
-            "RelativeHumidity": 50.0,
-            "ObjectDistance": 1.0,
-            "Emissivity": 0.95
-        }
-        
-        for key, line_edit in self.param_inputs.items():
-            # Try to get value from metadata
-            value = self.metadata.get(f"APP1:{key}", self.metadata.get(key, "N/A"))
-            
-            # Use default value if not found in metadata
-            if value == "N/A" and key in default_values:
-                value = default_values[key]
-                line_edit.setStyleSheet("background-color: #fff3cd;")  # Yellow highlight
-                line_edit.setToolTip(f"Default value used: {value}")
-            else:
-                line_edit.setStyleSheet("")
-                line_edit.setToolTip("")
-                
-            # Format numeric values appropriately
-            if isinstance(value, (int, float)) and value != "N/A":
-                if key in ["PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO"]:
-                    line_edit.setText(f"{float(value):.12f}")  # High precision for Planck constants
-                elif key in ["Emissivity", "ReflectedApparentTemperature", "AtmosphericTransmission"]:
-                    line_edit.setText(f"{float(value):.6f}")   # Medium precision
-                else:
-                    line_edit.setText(f"{float(value):.4f}")   # Standard precision
-            else:
-                line_edit.setText(str(value))
-
-    def reset_params_to_exif(self):
-        """
-        Reset all calculation parameters to values extracted from EXIF metadata.
-        
-        This method restores thermal calculation parameters to their original
-        EXIF values when available, or to appropriate default values when
-        EXIF data is missing. The UI is updated to reflect the source of
-        each parameter value.
-        """
-        if not hasattr(self, 'metadata') or not self.metadata:
-            self._apply_default_values()
-            return
-            
-        # Default values for parameters not available in EXIF
-        default_values = {
-            "AtmosphericTemperature": 20.0,
-            "AtmosphericTransmission": 0.95,
-            "RelativeHumidity": 50.0,
-            "ObjectDistance": 1.0,
-            "Emissivity": 0.95
-        }
-        
-        reset_count = 0
-        default_count = 0
-        
-        for key, line_edit in self.param_inputs.items():
-            exif_value = self.metadata.get(f"APP1:{key}", self.metadata.get(key))
-            
-            if exif_value is not None and exif_value != "N/A":
-                # Use EXIF value
-                if isinstance(exif_value, (int, float)):
-                    if key in ["PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO"]:
-                        line_edit.setText(f"{float(exif_value):.12f}")
-                    elif key in ["Emissivity", "ReflectedApparentTemperature", "AtmosphericTransmission"]:
-                        line_edit.setText(f"{float(exif_value):.6f}")
-                    else:
-                        line_edit.setText(f"{float(exif_value):.4f}")
-                else:
-                    line_edit.setText(str(exif_value))
-                
-                line_edit.setStyleSheet("")
-                line_edit.setToolTip(f"Value from EXIF metadata: {exif_value}")
-                reset_count += 1
-                
-            elif key in default_values:
-                # Use default value
-                default_value = default_values[key]
-                if key in ["Emissivity", "AtmosphericTransmission"]:
-                    line_edit.setText(f"{default_value:.6f}")
-                else:
-                    line_edit.setText(f"{default_value:.4f}")
-                
-                line_edit.setStyleSheet("background-color: #fff3cd;")  # Yellow highlight
-                line_edit.setToolTip(
-                    f"Default value used: {default_value}\n"
-                    "(Not available in EXIF metadata)"
-                )
-                default_count += 1
-            else:
-                # Parameter not available
-                line_edit.setText("N/A")
-                line_edit.setStyleSheet("background-color: #f8d7da;")  # Red highlight
-                line_edit.setToolTip("Parameter not available in EXIF metadata")
-                
-        print(f"Parameters reset completed:")
-        print(f"  - {reset_count} parameters restored from EXIF metadata")
-        print(f"  - {default_count} parameters set to default values")
-        
-        # Trigger recalculation with new parameters
-        self.recalculate_and_update_view()
-
-    def _apply_default_values(self):
-        """
-        Apply only default values when no metadata is available.
-        
-        This private method is called when EXIF metadata is completely
-        unavailable and all parameters must be set to sensible defaults.
-        """
-        default_values = {
-            "Emissivity": 0.95,
-            "ObjectDistance": 1.0,
-            "ReflectedApparentTemperature": 20.0,
-            "AtmosphericTemperature": 20.0,
-            "AtmosphericTransmission": 0.95,
-            "RelativeHumidity": 50.0,
-        }
-        
-        for key, line_edit in self.param_inputs.items():
-            if key in default_values:
-                default_value = default_values[key]
-                if key in ["Emissivity", "AtmosphericTransmission"]:
-                    line_edit.setText(f"{default_value:.6f}")
-                else:
-                    line_edit.setText(f"{default_value:.4f}")
-                line_edit.setStyleSheet("background-color: #fff3cd;")
-                line_edit.setToolTip(f"Default value: {default_value}")
-            else:
-                line_edit.setText("N/A")
-                line_edit.setStyleSheet("background-color: #f8d7da;")
-                line_edit.setToolTip("Parameter not available")
-        
-        print("Applied default values (no EXIF metadata available)")
+            # Re-enable auto-save
+            if hasattr(self, 'settings_manager'):
+                self.settings_manager.set_auto_save_enabled(True)
 
     def apply_environmental_correction(self, temp_data):
         """
@@ -1391,7 +1375,7 @@ class ThermalAnalyzerNG(QMainWindow):
         """Handle palette inversion toggle."""
         self.palette_inverted = not self.palette_inverted
         self.update_view_only()
-        self.save_settings_to_json()
+        self.auto_save_settings()  # Era save_settings_to_json()
         
     def on_thermal_mouse_move(self, point: QPointF):
         """
@@ -1434,6 +1418,13 @@ class ThermalAnalyzerNG(QMainWindow):
         This method handles both overlay and side-by-side display modes,
         updating the appropriate image views based on the current mode.
         """
+        # Sync visible image from thermal engine
+        if hasattr(self, 'thermal_engine'):
+            self.base_pixmap_visible = self.thermal_engine.base_pixmap_visible
+        
+        print(f"display_images called: overlay_mode={self.overlay_mode}, "
+              f"visible_available={self.base_pixmap_visible is not None}")
+        
         if self.overlay_mode:
             # Overlay mode: show thermal over visible
             if self.base_pixmap_visible is not None:
@@ -1463,13 +1454,18 @@ class ThermalAnalyzerNG(QMainWindow):
     
     def display_secondary_image(self):
         """Set the visible light image in the secondary view."""
+        # Always sync from thermal engine first
+        if hasattr(self, 'thermal_engine'):
+            self.base_pixmap_visible = self.thermal_engine.base_pixmap_visible
+        
         print(f"display_secondary_image called, pixmap available: {self.base_pixmap_visible is not None}")
+        
         if self.base_pixmap_visible is not None:
             self.secondary_image_view.set_thermal_pixmap(self.base_pixmap_visible)
             print(f"Secondary view pixmap set, size: {self.base_pixmap_visible.size()}")
         else:
             self.secondary_image_view.set_thermal_pixmap(QPixmap())
-            print("Secondary view cleared")
+            print("Secondary view cleared - no visible image available")
 
     def zoom_in(self):
         """Zoom in both image views."""
@@ -1558,9 +1554,16 @@ class ThermalAnalyzerNG(QMainWindow):
 
     def on_reset_alignment(self):
         """Reset overlay alignment to metadata values."""
-        self.overlay_scale = float(self.meta_overlay_scale)
-        self.overlay_offset_x = float(self.meta_offset_x)
-        self.overlay_offset_y = float(self.meta_offset_y)
+        if not hasattr(self, 'thermal_engine') or not self.thermal_engine.metadata:
+            print("No metadata available for overlay reset")
+            return
+            
+        # Get overlay parameters from thermal engine
+        overlay_params = self.thermal_engine.get_overlay_parameters_from_metadata()
+        
+        self.overlay_scale = float(overlay_params.get("scale", 1.0))
+        self.overlay_offset_x = float(overlay_params.get("offset_x", 0.0))
+        self.overlay_offset_y = float(overlay_params.get("offset_y", 0.0))
         
         # Update UI controls
         try:
@@ -1576,7 +1579,11 @@ class ThermalAnalyzerNG(QMainWindow):
             self.offsetx_spin.blockSignals(False)
             self.offsety_spin.blockSignals(False)
             
+        # Update display
         self.display_images()
+        
+        print(f"Overlay alignment reset to metadata values: scale={self.overlay_scale:.3f}, "
+              f"offset=({self.overlay_offset_x:.1f}, {self.overlay_offset_y:.1f})")
 
     def on_blend_mode_changed(self, mode: str):
         """
@@ -1662,7 +1669,9 @@ class ThermalAnalyzerNG(QMainWindow):
             event: Qt resize event.
         """
         super().resizeEvent(event)
-        if hasattr(self, 'secondary_image_view') and self.base_pixmap_visible is not None:
+        if (hasattr(self, 'secondary_image_view') and 
+            hasattr(self, 'base_pixmap_visible') and 
+            self.base_pixmap_visible is not None):
             self.display_secondary_image()
 
     def sync_views(self):
@@ -1698,42 +1707,16 @@ class ThermalAnalyzerNG(QMainWindow):
         """
         Update ROI analysis after creation or modification.
         
-        This method iterates through all ROIs and calculates temperature
-        statistics for each one. It then updates the ROI table and refreshes
-        the visual labels on the ROI items.
+        This method delegates to the ROI controller to update all ROI statistics
+        and then refreshes the UI components.
         """
-        import numpy as np
-        print(f"Updating ROI analysis for {len(self.rois)} ROIs...")
+        print("Updating ROI analysis...")
         
-        for roi_model in self.rois:
-            temps = self.compute_roi_temperatures(roi_model)
-            if temps is not None:
-                valid = temps[~np.isnan(temps)]
-                if valid.size > 0:
-                    roi_model.temp_min = float(np.min(valid))
-                    roi_model.temp_max = float(np.max(valid))
-                    roi_model.temp_mean = float(np.mean(valid))
-                    roi_model.temp_std = float(np.std(valid))
-                    roi_model.temp_median = float(np.median(valid))
-                else:
-                    # No valid temperature data
-                    roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = None
-                    roi_model.temp_std = roi_model.temp_median = None
-            else:
-                # ROI computation failed
-                roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = None
-                roi_model.temp_std = roi_model.temp_median = None
-                
-        self.update_roi_table()
+        # Use ROI controller to update all analyses
+        self.roi_controller.update_all_analyses()
         
-        # Refresh visual labels on ROI items
-        for roi_model in self.rois:
-            item = self.roi_items.get(roi_model.id)
-            if item and hasattr(item, "refresh_label"):
-                item.refresh_label()
-
-        print(f"ROI analysis completed. Total ROIs: {len(self.rois)}")
-        self.save_settings_to_json()
+        # The controller will emit analysis_updated signal which triggers on_roi_analysis_updated
+        print("ROI analysis update requested")
 
     def update_roi_table(self):
         """Update the ROI table with current data.
@@ -1749,12 +1732,15 @@ class ThermalAnalyzerNG(QMainWindow):
             # Block signals during update to prevent recursion
             blocker = QSignalBlocker(self.roi_table)
 
+            # Get all ROIs from controller
+            all_rois = self.roi_controller.get_all_rois()
+            
             # Clear and recreate table content
             self.roi_table.setRowCount(0)
             self.roi_table.clearContents()
-            self.roi_table.setRowCount(len(self.rois))
+            self.roi_table.setRowCount(len(all_rois))
 
-            for row, roi in enumerate(self.rois):
+            for row, roi in enumerate(all_rois):
                 # Name column (editable)
                 name_item = QTableWidgetItem(roi.name)
                 name_item.setData(Qt.UserRole, roi.id)  # Store ROI ID for reference
@@ -1801,7 +1787,7 @@ class ThermalAnalyzerNG(QMainWindow):
                 self.roi_table.setItem(row, 4, avg_item)
                 self.roi_table.setItem(row, 5, median_item)
 
-            print(f"ROI table updated with {len(self.rois)} rows")
+            print(f"ROI table updated with {len(all_rois)} rows")
             
         except Exception as e:
             print(f"Error updating ROI table: {e}")
@@ -1834,8 +1820,10 @@ class ThermalAnalyzerNG(QMainWindow):
     def on_roi_table_selection_changed(self):
         """Handle selection changes in the ROI table."""
         current_row = self.roi_table.currentRow()
-        if current_row >= 0 and current_row < len(self.rois):
-            roi = self.rois[current_row]
+        all_rois = self.roi_controller.get_all_rois()
+        
+        if current_row >= 0 and current_row < len(all_rois):
+            roi = all_rois[current_row]
             if roi.id in self.roi_items:
                 roi_item = self.roi_items[roi.id]
                 
@@ -1860,18 +1848,19 @@ class ThermalAnalyzerNG(QMainWindow):
         row = item.row()
         col = item.column()
         
-        if row >= len(self.rois):
+        all_rois = self.roi_controller.get_all_rois()
+        if row >= len(all_rois):
             return
             
-        roi = self.rois[row]
+        roi = all_rois[row]
         
         if col == 0:
             # Name column changed
             new_name = item.text().strip()
             if new_name:
-                roi.name = new_name
+                # Update via controller
+                self.roi_controller.update_roi(roi.id, name=new_name)
                 print(f"Updated ROI name to: {new_name}")
-                self.save_settings_to_json()
             else:
                 item.setText(roi.name)  # Restore original name
                 
@@ -1880,9 +1869,9 @@ class ThermalAnalyzerNG(QMainWindow):
             try:
                 new_emissivity = float(item.text())
                 if 0.0 <= new_emissivity <= 1.0:
-                    roi.emissivity = new_emissivity
+                    # Update via controller
+                    self.roi_controller.update_roi(roi.id, emissivity=new_emissivity)
                     print(f"Updated ROI emissivity to: {new_emissivity}")
-                    self.update_roi_analysis()  # Recalculate with new emissivity
                 else:
                     # Invalid range - restore original value
                     emissivity_value = getattr(roi, 'emissivity', 0.95)
@@ -1928,25 +1917,18 @@ class ThermalAnalyzerNG(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
                 
-        # Delete selected ROIs
+        # Get all ROIs from controller
+        all_rois = self.roi_controller.get_all_rois()
+        
+        # Collect ROI IDs to delete
+        roi_ids_to_delete = []
         for row in selected_rows:
-            if row >= len(self.rois):
-                continue
+            if row < len(all_rois):
+                roi_ids_to_delete.append(all_rois[row].id)
                 
-            roi = self.rois[row]
-            
-            # Remove from scene and items dict
-            if roi.id in self.roi_items:
-                roi_item = self.roi_items[roi.id]
-                self.image_view._scene.removeItem(roi_item)
-                del self.roi_items[roi.id]
-                
-            # Remove from ROIs list
-            self.rois.pop(row)
-            print(f"Deleted ROI: {roi.name}")
-            
-        self.update_roi_analysis()
-        self.save_settings_to_json()
+        # Delete ROIs using controller
+        deleted_count = self.roi_controller.delete_rois(roi_ids_to_delete)
+        print(f"Deleted {deleted_count} ROIs")
 
     def clear_all_rois(self, confirm=True):
         """
@@ -1955,7 +1937,8 @@ class ThermalAnalyzerNG(QMainWindow):
         Args:
             confirm (bool): Whether to show confirmation dialogue.
         """
-        if not self.rois:
+        all_rois = self.roi_controller.get_all_rois()
+        if not all_rois:
             return
         
         should_clear = True
@@ -1969,21 +1952,9 @@ class ThermalAnalyzerNG(QMainWindow):
             should_clear = (reply == QMessageBox.Yes)
         
         if should_clear:
-            # Remove all ROI items from scene
-            for roi_item in self.roi_items.values():
-                self.image_view._scene.removeItem(roi_item)
-                
-            # Clear data structures
-            self.rois.clear()
-            self.roi_items.clear()
-            self.update_roi_analysis()
-            
-            print("Cleared all ROIs")
-            
-        # Save settings if not ignoring auto-save
-        if (should_clear and hasattr(self, 'current_image_path') and 
-            self.current_image_path and not getattr(self, '_ignore_auto_save', False)):
-            self.save_settings_to_json()
+            # Use controller to clear all ROIs
+            cleared_count = self.roi_controller.clear_all_rois()
+            print(f"Cleared {cleared_count} ROIs")
 
     def activate_spot_tool(self):
         """Activate the spot ROI creation tool."""
@@ -2185,7 +2156,7 @@ class ThermalAnalyzerNG(QMainWindow):
             item.refresh_label()
 
         self.update_roi_table()
-        self.save_settings_to_json()
+        self.auto_save_settings()
 
     def on_label_settings_changed(self):
         """Handle changes to ROI label display settings."""
@@ -2207,7 +2178,7 @@ class ThermalAnalyzerNG(QMainWindow):
                 item.refresh_label()
         
         # Save settings
-        self.save_settings_to_json()
+        self.auto_save_settings()  # Era save_settings_to_json()
     
     def get_json_file_path(self):
         """
@@ -2222,94 +2193,6 @@ class ThermalAnalyzerNG(QMainWindow):
         import os
         base_path = os.path.splitext(self.current_image_path)[0]
         return f"{base_path}.json"
-    
-    def save_settings_to_json(self):
-        """
-        Save all current settings to a JSON file.
-        
-        This method saves the complete application state including thermal
-        parameters, ROI definitions, palette settings, and overlay configuration
-        to a JSON file with the same base name as the current image file.
-        
-        The saved settings can be automatically reloaded when the same image
-        is opened again, providing persistent configuration across sessions.
-        """
-        if not self.current_image_path or self._ignore_auto_save:
-            return
-        
-        json_path = self.get_json_file_path()
-        if not json_path:
-            return
-        
-        try:
-            # Collect thermal calculation parameters
-            thermal_params = {}
-            params_to_save = [
-                "Emissivity", "AtmosphericTemperature", 
-                "AtmosphericTransmission", "RelativeHumidity"
-            ]
-            
-            for param in params_to_save:
-                if param in self.param_inputs and self.param_inputs[param].text():
-                    try:
-                        thermal_params[param] = float(self.param_inputs[param].text())
-                    except ValueError:
-                        pass  # Skip invalid values
-                        
-            # Collect ROI data
-            rois_data = []
-            for roi in self.rois:
-                roi_data = {
-                    "type": roi.__class__.__name__,
-                    "name": roi.name,
-                    "emissivity": getattr(roi, 'emissivity', 0.95)
-                }
-                
-                # Add position data
-                if hasattr(roi, 'x') and hasattr(roi, 'y'):
-                    roi_data["x"] = roi.x
-                    roi_data["y"] = roi.y
-                
-                # Add geometry-specific data
-                if hasattr(roi, 'width') and hasattr(roi, 'height'):
-                    roi_data["width"] = roi.width
-                    roi_data["height"] = roi.height
-                elif hasattr(roi, 'radius'):
-                    roi_data["radius"] = roi.radius
-                elif hasattr(roi, 'points'):
-                    roi_data["points"] = roi.points
-                
-                rois_data.append(roi_data)
-                
-            # Collect overlay settings
-            overlay_settings = {
-                "scale": self.scale_spin.value() if hasattr(self, 'scale_spin') else 1.0,
-                "offset_x": self.offsetx_spin.value() if hasattr(self, 'offsetx_spin') else 0,
-                "offset_y": self.offsety_spin.value() if hasattr(self, 'offsety_spin') else 0,
-                "opacity": self.overlay_alpha_slider.value() if hasattr(self, 'overlay_alpha_slider') else 50,
-                "blend_mode": self.blend_combo.currentText() if hasattr(self, 'blend_combo') else "Normal"
-            }
-            
-            # Assemble complete settings data
-            settings_data = {
-                "version": "1.0",
-                "thermal_parameters": thermal_params,
-                "rois": rois_data,
-                "palette": self.palette_combo.currentText() if hasattr(self, 'palette_combo') else "Iron",
-                "palette_inverted": getattr(self, 'palette_inverted', False),
-                "overlay_settings": overlay_settings
-            }
-            
-            # Ensure directory exists and save to file
-            import os
-            os.makedirs(os.path.dirname(json_path), exist_ok=True)
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(settings_data, f, indent=2, ensure_ascii=False)
-            
-            print(f"Settings saved to: {json_path}")
-            
-        except Exception as e:
-            print(f"Error saving settings: {e}")
     
     def load_settings_from_json(self):
         """
@@ -2494,29 +2377,32 @@ class ThermalAnalyzerNG(QMainWindow):
         palette settings, or overlay controls. This ensures that changes
         are persisted without requiring manual save operations.
         """
+        # Avoid connecting multiple times
+        if hasattr(self, '_auto_save_connected') and self._auto_save_connected:
+            return
+            
         # Connect thermal parameter input signals
         for param_input in self.param_inputs.values():
             if hasattr(param_input, 'editingFinished'):
-                param_input.editingFinished.connect(self.save_settings_to_json)
+                param_input.editingFinished.connect(self.auto_save_settings)
                 
         # Connect palette control signals
         if hasattr(self, 'palette_combo'):
-            self.palette_combo.currentTextChanged.connect(self.save_settings_to_json)
+            self.palette_combo.currentTextChanged.connect(self.auto_save_settings)
             
         # Connect overlay control signals
         if hasattr(self, 'scale_spin'):
-            self.scale_spin.valueChanged.connect(self.save_settings_to_json)
+            self.scale_spin.valueChanged.connect(self.auto_save_settings)
         if hasattr(self, 'offsetx_spin'):
-            self.offsetx_spin.valueChanged.connect(self.save_settings_to_json)
+            self.offsetx_spin.valueChanged.connect(self.auto_save_settings)
         if hasattr(self, 'offsety_spin'):
-            self.offsety_spin.valueChanged.connect(self.save_settings_to_json)
+            self.offsety_spin.valueChanged.connect(self.auto_save_settings)
         if hasattr(self, 'overlay_alpha_slider'):
-            self.overlay_alpha_slider.valueChanged.connect(self.save_settings_to_json)
+            self.overlay_alpha_slider.valueChanged.connect(self.auto_save_settings)
         if hasattr(self, 'blend_combo'):
-            self.blend_combo.currentTextChanged.connect(self.save_settings_to_json)
+            self.blend_combo.currentTextChanged.connect(self.auto_save_settings)
         
-        print("Auto-save signals connected")
-        print("Auto-save signals connected")
+        self._auto_save_connected = True
         print("Auto-save signals connected")
 
     def _connect_ui_signals(self):
@@ -2540,126 +2426,415 @@ class ThermalAnalyzerNG(QMainWindow):
         # Make secondary view visible by default
         self.secondary_image_view.setVisible(True)
 
-    def create_rect_roi(self, thermal_rect: QRectF):
-        """Create a rectangular ROI from the image view signal.
-        
-        Args:
-            thermal_rect (QRectF): Rectangle in thermal image coordinates.
-        """
-        # Import here to avoid circular imports
-        from analysis.roi_models import RectROI
-        from ui.roi_items import RectROIItem
-        
-        # Create model with thermal image coordinates
-        roi_model = RectROI(
-            x=thermal_rect.x(), 
-            y=thermal_rect.y(), 
-            width=thermal_rect.width(), 
-            height=thermal_rect.height(), 
-            name=f"ROI_{len(self.rois)+1}"
-        )
-        roi_model.emissivity = 0.95
-
-        # Create graphics item as child of thermal item
-        roi_item = RectROIItem(roi_model, parent=self.image_view._thermal_item)
-        roi_item.setZValue(10)
-
-        # Register in collections
-        self.rois.append(roi_model)
-        self.roi_items[roi_model.id] = roi_item
-
-        # Update analysis/table
-        self.update_roi_analysis()
-        
-        # Per-ROI color (cycle through HSV wheel)
-        hue = (len(self.rois) * 55) % 360
-        color = QColor.fromHsv(hue, 220, 255)
-        roi_model.color = color
-        roi_item.set_color(color)
-        
-        print(f"Created ROI: {roi_model}")
-
-    def create_spot_roi(self, center_point: QPointF, radius: float):
-        """Create a spot ROI from the image view signal.
-        
-        Args:
-            center_point (QPointF): Center point in thermal image coordinates.
-            radius (float): Radius in thermal pixels.
-        """
-        # Import here to avoid circular imports
-        from analysis.roi_models import SpotROI
-        from ui.roi_items import SpotROIItem
-        
-        # Create spot ROI model
-        spot_model = SpotROI(
-            x=center_point.x(), 
-            y=center_point.y(), 
-            radius=radius,
-            name=f"Spot_{len(self.rois)+1}"
-        )
-        spot_model.emissivity = 0.95
-        
-        # Create graphics item as child of thermal item
-        spot_item = SpotROIItem(spot_model, parent=self.image_view._thermal_item)
-        spot_item.setZValue(10)
-        
-        # Register in collections
-        self.rois.append(spot_model)
-        self.roi_items[spot_model.id] = spot_item
-        
-        # Update analysis/table
-        self.update_roi_analysis()
-        
-        # Per-ROI color (cycle through HSV wheel)
-        hue = (len(self.rois) * 55) % 360
-        color = QColor.fromHsv(hue, 220, 255)
-        spot_model.color = color
-        spot_item.set_color(color)
-        
-        print(f"Created Spot ROI: {spot_model}")
-
-    def create_polygon_roi(self, points: list):
-        """Create a polygon ROI from the image view signal.
-        
-        Args:
-            points (list): List of (x, y) coordinate tuples in thermal image space.
-        """
-        # Import here to avoid circular imports
-        from analysis.roi_models import PolygonROI
-        from ui.roi_items import PolygonROIItem
-        
-        # Create polygon ROI model
-        polygon_model = PolygonROI(
-            points=points,
-            name=f"Polygon_{len(self.rois)+1}"
-        )
-        polygon_model.emissivity = 0.95
-        
-        # Create graphics item as child of thermal item
-        polygon_item = PolygonROIItem(polygon_model, parent=self.image_view._thermal_item)
-        polygon_item.setZValue(10)
-        
-        # Register in collections
-        self.rois.append(polygon_model)
-        self.roi_items[polygon_model.id] = polygon_item
-        
-        # Update analysis/table
-        self.update_roi_analysis()
-        
-        # Per-ROI color (cycle through HSV wheel)
-        hue = (len(self.rois) * 55) % 360
-        color = QColor.fromHsv(hue, 220, 255)
-        polygon_model.color = color
-        polygon_item.set_color(color)
-        
-        print(f"Created Polygon ROI: {polygon_model}")
-
     def on_roi_modified(self, roi_model):
-        """Handle ROI modification (move/resize) events.
+        """Handle ROI modified event from both UI and controller."""
+        print(f"🔄 ROI modified: {roi_model.name} (ID: {roi_model.id})")
+        
+        # IMPORTANTE: Ricalcola le statistiche di temperatura per questo ROI
+        if hasattr(self, 'roi_controller') and hasattr(self, 'thermal_engine'):
+            if self.thermal_engine.temperature_data is not None:
+                print(f"  ➡️ Recalculating temperature statistics for {roi_model.name}")
+                
+                # Debug: check current ROI position
+                if hasattr(roi_model, 'x') and hasattr(roi_model, 'y'):
+                    print(f"    Position: ({roi_model.x:.1f}, {roi_model.y:.1f})")
+                    if hasattr(roi_model, 'width') and hasattr(roi_model, 'height'):
+                        print(f"    Size: {roi_model.width:.1f} x {roi_model.height:.1f}")
+                
+                # Find the ROI in controller and update it
+                controller_roi = self.roi_controller.get_roi_by_id(roi_model.id)
+                if controller_roi is not None:
+                    if controller_roi is roi_model:
+                        print("    ✅ Same object - updating directly")
+                    else:
+                        print("    ⚠️ Different object - syncing data")
+                        # Sync the data from the UI model to controller model
+                        if hasattr(roi_model, 'x'):
+                            controller_roi.x = roi_model.x
+                        if hasattr(roi_model, 'y'):
+                            controller_roi.y = roi_model.y
+                        if hasattr(roi_model, 'width'):
+                            controller_roi.width = roi_model.width
+                        if hasattr(roi_model, 'height'):
+                            controller_roi.height = roi_model.height
+                        if hasattr(roi_model, 'radius'):
+                            controller_roi.radius = roi_model.radius
+                        if hasattr(roi_model, 'points'):
+                            controller_roi.points = roi_model.points
+                    
+                    # Now update statistics
+                    self.roi_controller._update_roi_statistics(controller_roi)
+                    
+                    # Show debug info about calculated stats
+                    if hasattr(controller_roi, 'temp_mean') and controller_roi.temp_mean is not None:
+                        print(f"    📊 Stats: min={controller_roi.temp_min:.2f}°C, "
+                              f"max={controller_roi.temp_max:.2f}°C, "
+                              f"mean={controller_roi.temp_mean:.2f}°C")
+                    else:
+                        print("    ❌ No temperature statistics calculated")
+                else:
+                    print(f"    ❌ ROI {roi_model.id} not found in controller")
+            else:
+                print(f"  ⏸️ Skipping statistics (no thermal data)")
+        else:
+            print(f"  ❌ Missing controller or thermal engine")
+        
+        # Refresh visual label (ora con le nuove statistiche)
+        item = self.roi_items.get(roi_model.id)
+        if item and hasattr(item, "refresh_label"):
+            item.refresh_label()
+
+        # Update table (ora con i valori aggiornati)
+        self.update_roi_table()
+        
+        # Delay auto-save to avoid spam during dragging
+        if not hasattr(self, '_roi_save_timer'):
+            from PySide6.QtCore import QTimer
+            self._roi_save_timer = QTimer()
+            self._roi_save_timer.setSingleShot(True)
+            self._roi_save_timer.timeout.connect(self.auto_save_settings)
+        
+        # Restart timer (500ms delay)
+        self._roi_save_timer.start(500)
+
+    def reset_params_to_exif(self):
+        """
+        Reset all calculation parameters to values extracted from EXIF metadata.
+        
+        This method restores thermal calculation parameters to their original
+        EXIF values when available, or to appropriate default values when
+        EXIF data is missing. The UI is updated to reflect the source of
+        each parameter value.
+        """
+        if not hasattr(self, 'thermal_engine') or not self.thermal_engine.metadata:
+            self._apply_default_parameter_values()
+            return
+            
+        # Get parameters from thermal engine
+        parameters = self.thermal_engine.get_thermal_parameters_from_metadata()
+        
+        reset_count = 0
+        default_count = 0
+        
+        # Default values for parameters not available in EXIF
+        default_values = {
+            "AtmosphericTemperature": 20.0,
+            "AtmosphericTransmission": 0.95,
+            "RelativeHumidity": 50.0,
+            "ObjectDistance": 1.0,
+            "Emissivity": 0.95
+        }
+        
+        for key, line_edit in self.param_inputs.items():
+            if key in parameters and parameters[key] is not None:
+                # Use value from metadata
+                value = parameters[key]
+                if key in ["PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO"]:
+                    line_edit.setText(f"{float(value):.12f}")
+                elif key in ["Emissivity", "ReflectedApparentTemperature", "AtmosphericTransmission"]:
+                    line_edit.setText(f"{float(value):.6f}")
+                else:
+                    line_edit.setText(f"{float(value):.4f}")
+                
+                line_edit.setStyleSheet("")
+                line_edit.setToolTip(f"Value from EXIF metadata: {value}")
+                reset_count += 1
+                
+            elif key in default_values:
+                # Use default value
+                default_value = default_values[key]
+                if key in ["Emissivity", "AtmosphericTransmission"]:
+                    line_edit.setText(f"{default_value:.6f}")
+                else:
+                    line_edit.setText(f"{default_value:.4f}")
+                
+                line_edit.setStyleSheet("background-color: #fff3cd;")  # Yellow highlight
+                line_edit.setToolTip(
+                    f"Default value used: {default_value}\n"
+                    "(Not available in EXIF metadata)"
+                )
+                default_count += 1
+            else:
+                # Parameter not available
+                line_edit.setText("N/A")
+                line_edit.setStyleSheet("background-color: #f8d7da;")  # Red highlight
+                line_edit.setToolTip("Parameter not available in EXIF metadata")
+                
+        print(f"Parameters reset completed:")
+        print(f"  - {reset_count} parameters restored from EXIF metadata")
+        print(f"  - {default_count} parameters set to default values")
+        
+        # Trigger recalculation with new parameters
+        self.recalculate_and_update_view()
+
+    def _apply_default_parameter_values(self):
+        """
+        Apply only default values when no metadata is available.
+        
+        This private method is called when EXIF metadata is completely
+        unavailable and all parameters must be set to sensible defaults.
+        """
+        default_values = {
+            "Emissivity": 0.95,
+            "ObjectDistance": 1.0,
+            "ReflectedApparentTemperature": 20.0,
+            "AtmosphericTemperature": 20.0,
+            "AtmosphericTransmission": 0.95,
+            "RelativeHumidity": 50.0,
+        }
+        
+        for key, line_edit in self.param_inputs.items():
+            if key in default_values:
+                default_value = default_values[key]
+                if key in ["Emissivity", "AtmosphericTransmission"]:
+                    line_edit.setText(f"{default_value:.6f}")
+                else:
+                    line_edit.setText(f"{default_value:.4f}")
+                line_edit.setStyleSheet("background-color: #fff3cd;")
+                line_edit.setToolTip(f"Default value: {default_value}")
+            else:
+                line_edit.setText("N/A")
+                line_edit.setStyleSheet("background-color: #f8d7da;")
+                line_edit.setToolTip("Parameter not available")
+        
+        print("Applied default values (no EXIF metadata available)")
+
+    def populate_params(self):
+        """
+        Populate thermal calculation parameters from EXIF metadata.
+        
+        This method extracts thermal calculation parameters from the loaded
+        image metadata and populates the UI input fields. For missing
+        parameters, appropriate default values are used and highlighted.
+        """
+        if not hasattr(self, 'thermal_engine') or not self.thermal_engine.metadata:
+            return
+            
+        # Get parameters from thermal engine
+        parameters = self.thermal_engine.get_thermal_parameters_from_metadata()
+        
+        # Default values for missing parameters
+        default_values = {
+            "AtmosphericTemperature": 20.0,
+            "AtmosphericTransmission": 0.95,
+            "RelativeHumidity": 50.0,
+            "ObjectDistance": 1.0,
+            "Emissivity": 0.95
+        }
+        
+        for key, line_edit in self.param_inputs.items():
+            value = parameters.get(key)
+            
+            # Use default value if not found in metadata
+            if value is None and key in default_values:
+                value = default_values[key]
+                line_edit.setStyleSheet("background-color: #fff3cd;")  # Yellow highlight
+                line_edit.setToolTip(f"Default value used: {value}")
+            elif value is not None:
+                line_edit.setStyleSheet("")
+                line_edit.setToolTip("")
+            else:
+                line_edit.setText("N/A")
+                line_edit.setStyleSheet("background-color: #f8d7da;")  # Red highlight
+                line_edit.setToolTip("Parameter not available in EXIF metadata")
+                continue
+                
+            # Format numeric values appropriately
+            if value is not None:
+                if key in ["PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO"]:
+                    line_edit.setText(f"{float(value):.12f}")  # High precision for Planck constants
+                elif key in ["Emissivity", "ReflectedApparentTemperature", "AtmosphericTransmission"]:
+                    line_edit.setText(f"{float(value):.6f}")   # Medium precision
+                else:
+                    line_edit.setText(f"{float(value):.4f}")   # Standard precision
+
+    def update_analysis(self):
+        """
+        Legacy method - prefer recalculate_and_update_view().
+        
+        This method is maintained for backward compatibility but new code
+        should use the more explicit recalculate_and_update_view() method.
+        """
+        self.recalculate_and_update_view()
+
+    def calculate_temperature_matrix(self):
+        """
+        Calculate temperature matrix from raw thermal data using Planck equation.
+        
+        This method delegates to the ThermalEngine for the actual calculation
+        and updates the UI accordingly.
+        """
+        if not hasattr(self, 'thermal_engine'):
+            return
+            
+        thermal_params = self.get_current_thermal_parameters()
+        success = self.thermal_engine.calculate_temperatures(thermal_params)
+        
+        if success:
+            # Update temperature range from engine
+            self.temp_min = self.thermal_engine.temp_min
+            self.temp_max = self.thermal_engine.temp_max
+        else:
+            print("Failed to calculate temperatures")
+
+    def create_colored_pixmap(self):
+        """
+        Create a colored pixmap from temperature data using the selected palette.
+        
+        This method delegates to the ThermalEngine and updates the UI display.
+        """
+        if not hasattr(self, 'thermal_engine'):
+            return
+            
+        pixmap = self.thermal_engine.create_colored_pixmap(
+            self.selected_palette, self.palette_inverted
+        )
+        
+        if not pixmap.isNull():
+            self.base_pixmap = pixmap
+            self.display_thermal_image()
+
+    def update_legend(self):
+        """
+        Update the color bar legend with current palette and temperature range.
+        
+        This method synchronizes the color bar legend widget with the current
+        selected palette, inversion state, and calculated temperature range.
+        """
+        if not hasattr(self, 'thermal_engine') or self.thermal_engine.temperature_data is None:
+            return
+            
+        self.colorbar.set_palette(self.selected_palette, self.palette_inverted)
+        self.colorbar.set_range(self.thermal_engine.temp_min, self.thermal_engine.temp_max)
+
+    def on_thermal_mouse_move(self, point):
+        """
+        Handle mouse movement over thermal image to display temperature tooltip.
         
         Args:
-            roi_model: The ROI model that was modified.
+            point (QPointF): Mouse position in image coordinates.
         """
-        print(f"ROI modified: {roi_model.name}")
-        # Update just this single ROI instead of all ROIs for better performance
-        self.update_single_roi(roi_model)
+        if not hasattr(self, 'thermal_engine') or self.thermal_engine.temperature_data is None:
+            self.temp_tooltip_label.setVisible(False)
+            return
+            
+        img_h, img_w = self.thermal_engine.temperature_data.shape
+        matrix_x = int(point.x())
+        matrix_y = int(point.y())
+        
+        # Check if point is within image bounds
+        if 0 <= matrix_x < img_w and 0 <= matrix_y < img_h:
+            temperature = self.thermal_engine.get_temperature_at_point(matrix_x, matrix_y)
+            if not np.isnan(temperature):
+                try:
+                    thermal_params = self.get_current_thermal_parameters()
+                    emissivity = thermal_params.get("Emissivity", 0.95)
+                    self.temp_tooltip_label.setText(f"{temperature:.2f} °C | ε: {emissivity:.3f}")
+                except (ValueError, KeyError):
+                    self.temp_tooltip_label.setText(f"{temperature:.2f} °C")
+                    
+                # Position tooltip near cursor
+                cursor_pos = self.image_view.mapFromGlobal(self.cursor().pos())
+                self.temp_tooltip_label.move(cursor_pos.x() + 10, cursor_pos.y() + 10)
+                self.temp_tooltip_label.setVisible(True)
+                self.temp_tooltip_label.adjustSize()
+                return
+        
+        self.temp_tooltip_label.setVisible(False)
+
+    def update_single_roi(self, roi_model):
+        """
+        Update statistics for a single ROI using the ROI controller.
+        
+        Args:
+            roi_model: The ROI model to update.
+        """
+        if hasattr(self, 'roi_controller'):
+            # Update via controller
+            self.roi_controller._update_roi_statistics(roi_model)
+            
+            # Refresh visual label
+            item = self.roi_items.get(roi_model.id)
+            if item and hasattr(item, "refresh_label"):
+                item.refresh_label()
+
+            self.update_roi_table()
+            self.auto_save_settings()
+        else:
+            print("ROI controller not available")
+
+    def on_thermal_error(self, error_message: str):
+        """Handle thermal engine errors."""
+        print(f"Thermal engine error: {error_message}")
+        QMessageBox.critical(self, "Thermal Engine Error", error_message)
+
+    def on_roi_removed(self, roi_id: str):
+        """Handle ROI removed event from ROIController."""
+        print(f"ROI removed: {roi_id}")
+        
+        # Remove from scene
+        if roi_id in self.roi_items:
+            roi_item = self.roi_items[roi_id]
+            self.image_view._scene.removeItem(roi_item)
+            del self.roi_items[roi_id]
+        
+        # Update table
+        self.update_roi_table()
+        
+        # Auto-save
+        self.auto_save_settings()
+
+    def on_rois_cleared(self):
+        """Handle ROIs cleared event from ROIController."""
+        print("All ROIs cleared")
+        
+        # Remove all items from scene
+        for roi_item in self.roi_items.values():
+            self.image_view._scene.removeItem(roi_item)
+        
+        # Clear UI collection
+        self.roi_items.clear()
+        
+        # Update table
+        self.update_roi_table()
+        
+        # Auto-save
+        self.auto_save_settings()
+
+    def on_roi_analysis_updated(self):
+        """Handle ROI analysis updated event from ROIController."""
+        print("ROI analysis updated")
+        
+        # Refresh all ROI labels
+        for roi_model in self.roi_controller.get_all_rois():
+            item = self.roi_items.get(roi_model.id)
+            if item and hasattr(item, "refresh_label"):
+                item.refresh_label()
+        
+        # Update table
+        self.update_roi_table()
+
+    def on_settings_saved(self, file_path: str):
+        """Handle settings saved event from SettingsManager."""
+        print(f"Settings saved: {file_path}")
+
+    def on_settings_error(self, error_message: str):
+        """Handle settings manager errors."""
+        print(f"Settings error: {error_message}")
+        # Don't show message box for settings errors to avoid interrupting user workflow
+
+    def update_view_only(self):
+        """
+        Update only the visualisation using already calculated temperature data.
+        
+        This method should be used when only palette or colour inversion changes,
+        as it doesn't recalculate temperatures but only updates the visual
+        representation of existing data.
+        """
+        if not hasattr(self, 'thermal_engine') or self.thermal_engine.temperature_data is None:
+            return
+            
+        print(">>> Updating visualisation only...")
+        self.update_thermal_display()
+        self.update_legend()
+        self.display_images()

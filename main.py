@@ -196,7 +196,12 @@ if __name__ == "__main__":
 
     def show_main_window():
         """Shows the main application window."""
-        window.show()
+        try:
+            window.show()
+        except Exception as e:
+            print(f"Error showing main window: {e}")
+            import traceback
+            traceback.print_exc()
 
     def start_closing_splash():
         """Starts the fade-out animation for the splash screen."""

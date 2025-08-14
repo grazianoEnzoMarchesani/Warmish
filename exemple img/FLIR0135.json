@@ -4,15 +4,34 @@
     "Emissivity": 0.98,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
-    "RelativeHumidity": 0.5
+    "RelativeHumidity": 0.5,
+    "ObjectDistance": 3.469,
+    "ReflectedApparentTemperature": 19.999994
+  },
+  "palette": "Autumn",
+  "palette_inverted": false,
+  "overlay_settings": {
+    "scale": 0.7371037717330103,
+    "offset_x": -10.0,
+    "offset_y": -21.0,
+    "opacity": 100,
+    "blend_mode": "Normal"
+  },
+  "roi_label_settings": {
+    "name": true,
+    "emissivity": true,
+    "min": true,
+    "max": true,
+    "avg": true,
+    "median": false
   },
   "rois": [
     {
       "type": "SpotROI",
       "name": "saasas",
       "emissivity": 0.95,
-      "x": 196.44328835164578,
-      "y": 162.8895780980573,
+      "x": 265.0063993337439,
+      "y": 68.70293237074262,
       "radius": 37.47300215982719
     },
     {
@@ -21,20 +40,20 @@
       "emissivity": 0.95,
       "points": [
         [
-          101.2913059598284,
-          37.50754762507283
+          89.52018879361586,
+          38.81544953242978
         ],
         [
-          105.95653274168585,
-          102.82072257107716
+          94.1854155754733,
+          104.1286244784341
         ],
         [
-          182.15523684535754,
-          101.26564697712466
+          170.384119679145,
+          102.57354888448161
         ],
         [
-          101.2913059598284,
-          37.50754762507283
+          89.52018879361586,
+          38.81544953242978
         ]
       ]
     },
@@ -42,19 +61,19 @@
       "type": "RectROI",
       "name": "ROI_3",
       "emissivity": 0.95,
-      "x": 26,
+      "x": 37,
       "y": 158,
       "width": 93.95283690656248,
       "height": 63.47985240199861
+    },
+    {
+      "type": "RectROI",
+      "name": "ROI_1",
+      "emissivity": 0.95,
+      "x": 243,
+      "y": 162,
+      "width": 43.81471389645776,
+      "height": 47.084468664850135
     }
-  ],
-  "palette": "Autumn",
-  "palette_inverted": false,
-  "overlay_settings": {
-    "scale": 0.737,
-    "offset_x": -10,
-    "offset_y": -21,
-    "opacity": 50,
-    "blend_mode": "Overlay"
-  }
+  ]
 }
