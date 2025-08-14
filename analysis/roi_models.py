@@ -1,6 +1,163 @@
 # analysis/roi_models.py
 import uuid
-from typing import Optional
+import math
+from typing import Optional, Union
+import numpy as np
+
+
+class StatisticsCalculator:
+    """
+    Utility class for calculating temperature statistics for ROI regions.
+    
+    This class implements the Separation of Concerns principle by separating
+    statistical calculations from ROI model data. It can calculate statistics
+    for any ROI type (RectROI, SpotROI, PolygonROI) using polymorphism.
+    """
+    
+    @staticmethod
+    def calculate_statistics(roi: Union['RectROI', 'SpotROI', 'PolygonROI'], 
+                           temperature_data: np.ndarray) -> dict:
+        """
+        Calculate temperature statistics for any ROI type.
+        
+        Args:
+            roi: ROI model instance (RectROI, SpotROI, or PolygonROI)
+            temperature_data: 2D numpy array of temperature values
+            
+        Returns:
+            dict: Dictionary containing calculated statistics
+                 Keys: 'min', 'max', 'mean', 'std', 'median' (median only for SpotROI and PolygonROI)
+        """
+        # Dispatch to specific calculation method based on ROI type
+        if isinstance(roi, RectROI):
+            return StatisticsCalculator._calculate_rect_statistics(roi, temperature_data)
+        elif isinstance(roi, SpotROI):
+            return StatisticsCalculator._calculate_spot_statistics(roi, temperature_data)
+        elif isinstance(roi, PolygonROI):
+            return StatisticsCalculator._calculate_polygon_statistics(roi, temperature_data)
+        else:
+            raise ValueError(f"Unsupported ROI type: {type(roi)}")
+    
+    @staticmethod
+    def _calculate_rect_statistics(roi: 'RectROI', temperature_data: np.ndarray) -> dict:
+        """Calculate statistics for rectangular ROI."""
+        # Get integer bounds for array indexing
+        x1, y1 = int(roi.x), int(roi.y)
+        x2, y2 = int(roi.x + roi.width), int(roi.y + roi.height)
+        
+        # Ensure bounds are within array limits
+        height, width = temperature_data.shape
+        x1, x2 = max(0, x1), min(width, x2)
+        y1, y2 = max(0, y1), min(height, y2)
+        
+        if x1 >= x2 or y1 >= y2:
+            # Invalid bounds
+            return {'min': None, 'max': None, 'mean': None, 'std': None}
+        
+        # Extract ROI region
+        roi_temps = temperature_data[y1:y2, x1:x2]
+        
+        # Remove NaN values
+        valid_temps = roi_temps[~np.isnan(roi_temps)]
+        
+        if len(valid_temps) == 0:
+            return {'min': None, 'max': None, 'mean': None, 'std': None}
+        else:
+            return {
+                'min': float(np.min(valid_temps)),
+                'max': float(np.max(valid_temps)),
+                'mean': float(np.mean(valid_temps)),
+                'std': float(np.std(valid_temps))
+            }
+    
+    @staticmethod
+    def _calculate_spot_statistics(roi: 'SpotROI', temperature_data: np.ndarray) -> dict:
+        """Calculate statistics for circular (spot) ROI."""
+        # Get the bounds of the circle
+        x1, y1, x2, y2 = roi.get_bounds()
+        
+        # Get integer bounds for array indexing
+        x1, y1 = int(x1), int(y1)
+        x2, y2 = int(x2), int(y2)
+        
+        # Ensure bounds are within array limits
+        height, width = temperature_data.shape
+        x1, x2 = max(0, x1), min(width, x2)
+        y1, y2 = max(0, y1), min(height, y2)
+        
+        if x1 >= x2 or y1 >= y2:
+            # Invalid bounds
+            return {'min': None, 'max': None, 'mean': None, 'std': None, 'median': None}
+        
+        # Create a mask for the circular area
+        y_indices, x_indices = np.ogrid[y1:y2, x1:x2]
+        mask = ((x_indices - roi.x) ** 2 + (y_indices - roi.y) ** 2) <= (roi.radius ** 2)
+        
+        # Extract temperatures within the circular ROI
+        roi_temps = temperature_data[y1:y2, x1:x2]
+        circular_temps = roi_temps[mask]
+        
+        # Remove NaN values
+        valid_temps = circular_temps[~np.isnan(circular_temps)]
+        
+        if len(valid_temps) == 0:
+            return {'min': None, 'max': None, 'mean': None, 'std': None, 'median': None}
+        else:
+            return {
+                'min': float(np.min(valid_temps)),
+                'max': float(np.max(valid_temps)),
+                'mean': float(np.mean(valid_temps)),
+                'std': float(np.std(valid_temps)),
+                'median': float(np.median(valid_temps))
+            }
+    
+    @staticmethod
+    def _calculate_polygon_statistics(roi: 'PolygonROI', temperature_data: np.ndarray) -> dict:
+        """Calculate statistics for polygonal ROI."""
+        if len(roi.points) < 3:
+            return {'min': None, 'max': None, 'mean': None, 'std': None, 'median': None}
+        
+        # Get the bounds of the polygon
+        x1, y1, x2, y2 = roi.get_bounds()
+        
+        # Get integer bounds for array indexing
+        x1, y1 = int(x1), int(y1)
+        x2, y2 = int(x2), int(y2)
+        
+        # Ensure bounds are within array limits
+        height, width = temperature_data.shape
+        x1, x2 = max(0, x1), min(width, x2)
+        y1, y2 = max(0, y1), min(height, y2)
+        
+        if x1 >= x2 or y1 >= y2:
+            return {'min': None, 'max': None, 'mean': None, 'std': None, 'median': None}
+        
+        # Create a mask for the polygonal area
+        y_indices, x_indices = np.meshgrid(np.arange(y1, y2), np.arange(x1, x2), indexing='ij')
+        
+        # Check each pixel if it's inside the polygon
+        mask = np.zeros((y2 - y1, x2 - x1), dtype=bool)
+        for i in range(y2 - y1):
+            for j in range(x2 - x1):
+                mask[i, j] = roi.contains_point(x1 + j, y1 + i)
+        
+        # Extract temperatures within the polygonal ROI
+        roi_temps = temperature_data[y1:y2, x1:x2]
+        polygon_temps = roi_temps[mask]
+        
+        # Remove NaN values
+        valid_temps = polygon_temps[~np.isnan(polygon_temps)]
+        
+        if len(valid_temps) == 0:
+            return {'min': None, 'max': None, 'mean': None, 'std': None, 'median': None}
+        else:
+            return {
+                'min': float(np.min(valid_temps)),
+                'max': float(np.max(valid_temps)),
+                'mean': float(np.mean(valid_temps)),
+                'std': float(np.std(valid_temps)),
+                'median': float(np.median(valid_temps))
+            }
 
 
 class RectROI:
@@ -8,6 +165,8 @@ class RectROI:
     Model class for rectangular Regions of Interest (ROI).
     
     Represents a rectangular area with position, dimensions, and metadata.
+    Contains only data and simple geometric operations. Statistical calculations
+    are handled by the StatisticsCalculator class.
     """
     
     def __init__(self, x: float, y: float, width: float, height: float, name: str = ""):
@@ -28,7 +187,7 @@ class RectROI:
         self.height = height
         self.name = name if name else f"ROI_{str(self.id)[:8]}"
         
-        # Statistics will be calculated when analyzing temperature data
+        # Statistics will be calculated and stored by StatisticsCalculator
         self.temp_min: Optional[float] = None
         self.temp_max: Optional[float] = None
         self.temp_mean: Optional[float] = None
@@ -57,53 +216,20 @@ class RectROI:
         return (self.x <= x <= self.x + self.width and 
                 self.y <= y <= self.y + self.height)
     
-    def calculate_statistics(self, temperature_data):
-        """
-        Calculate temperature statistics for this ROI area.
-        
-        Args:
-            temperature_data: 2D numpy array of temperature values
-        """
-        import numpy as np
-        
-        # Get integer bounds for array indexing
-        x1, y1 = int(self.x), int(self.y)
-        x2, y2 = int(self.x + self.width), int(self.y + self.height)
-        
-        # Ensure bounds are within array limits
-        height, width = temperature_data.shape
-        x1, x2 = max(0, x1), min(width, x2)
-        y1, y2 = max(0, y1), min(height, y2)
-        
-        if x1 >= x2 or y1 >= y2:
-            # Invalid bounds
-            self.temp_min = self.temp_max = self.temp_mean = self.temp_std = None
-            return
-        
-        # Extract ROI region
-        roi_temps = temperature_data[y1:y2, x1:x2]
-        
-        # Remove NaN values
-        valid_temps = roi_temps[~np.isnan(roi_temps)]
-        
-        if len(valid_temps) == 0:
-            self.temp_min = self.temp_max = self.temp_mean = self.temp_std = None
-        else:
-            self.temp_min = float(np.min(valid_temps))
-            self.temp_max = float(np.max(valid_temps))
-            self.temp_mean = float(np.mean(valid_temps))
-            self.temp_std = float(np.std(valid_temps))
-    
     def __str__(self):
         return f"RectROI(name='{self.name}', x={self.x}, y={self.y}, w={self.width}, h={self.height})"
+
 
 class SpotROI:
     """
     Point/circle ROI with center (x,y) and radius in thermal pixels.
     
     Represents a circular area with position, radius, and metadata for
-    thermal analysis of spot measurements.
+    thermal analysis of spot measurements. Contains only data and simple
+    geometric operations. Statistical calculations are handled by the 
+    StatisticsCalculator class.
     """
+    
     def __init__(self, x: float, y: float, radius: float = 5.0, name: str = ""):
         """
         Initialize a spot (circular) ROI.
@@ -120,7 +246,7 @@ class SpotROI:
         self.radius = radius
         self.name = name if name else f"Spot_{str(self.id)[:8]}"
         
-        # Statistics will be calculated when analyzing temperature data
+        # Statistics will be calculated and stored by StatisticsCalculator
         self.temp_min: Optional[float] = None
         self.temp_max: Optional[float] = None
         self.temp_mean: Optional[float] = None
@@ -148,64 +274,20 @@ class SpotROI:
         Returns:
             bool: True if point is inside the circular ROI
         """
-        import math
         distance = math.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
         return distance <= self.radius
-    
-    def calculate_statistics(self, temperature_data):
-        """
-        Calculate temperature statistics for this circular ROI area.
-        
-        Args:
-            temperature_data: 2D numpy array of temperature values
-        """
-        import numpy as np
-        
-        # Get the bounds of the circle
-        x1, y1, x2, y2 = self.get_bounds()
-        
-        # Get integer bounds for array indexing
-        x1, y1 = int(x1), int(y1)
-        x2, y2 = int(x2), int(y2)
-        
-        # Ensure bounds are within array limits
-        height, width = temperature_data.shape
-        x1, x2 = max(0, x1), min(width, x2)
-        y1, y2 = max(0, y1), min(height, y2)
-        
-        if x1 >= x2 or y1 >= y2:
-            # Invalid bounds
-            self.temp_min = self.temp_max = self.temp_mean = self.temp_std = self.temp_median = None
-            return
-        
-        # Create a mask for the circular area
-        y_indices, x_indices = np.ogrid[y1:y2, x1:x2]
-        mask = ((x_indices - self.x) ** 2 + (y_indices - self.y) ** 2) <= (self.radius ** 2)
-        
-        # Extract temperatures within the circular ROI
-        roi_temps = temperature_data[y1:y2, x1:x2]
-        circular_temps = roi_temps[mask]
-        
-        # Remove NaN values
-        valid_temps = circular_temps[~np.isnan(circular_temps)]
-        
-        if len(valid_temps) == 0:
-            self.temp_min = self.temp_max = self.temp_mean = self.temp_std = self.temp_median = None
-        else:
-            self.temp_min = float(np.min(valid_temps))
-            self.temp_max = float(np.max(valid_temps))
-            self.temp_mean = float(np.mean(valid_temps))
-            self.temp_std = float(np.std(valid_temps))
-            self.temp_median = float(np.median(valid_temps))
 
     def __str__(self):
         return f"SpotROI(name='{self.name}', x={self.x}, y={self.y}, r={self.radius})"
+
 
 class PolygonROI:
     """
     Model class for polygonal Regions of Interest (ROI).
     
     Represents a polygonal area defined by a list of vertices.
+    Contains only data and simple geometric operations. Statistical 
+    calculations are handled by the StatisticsCalculator class.
     """
     
     def __init__(self, points: list, name: str = ""):
@@ -220,7 +302,7 @@ class PolygonROI:
         self.points = points if points else []  # List of (x, y) tuples
         self.name = name if name else f"Polygon_{str(self.id)[:8]}"
         
-        # Statistics will be calculated when analyzing temperature data
+        # Statistics will be calculated and stored by StatisticsCalculator
         self.temp_min: Optional[float] = None
         self.temp_max: Optional[float] = None
         self.temp_mean: Optional[float] = None
@@ -269,60 +351,6 @@ class PolygonROI:
             j = i
         
         return inside
-    
-    def calculate_statistics(self, temperature_data):
-        """
-        Calculate temperature statistics for this polygonal ROI area.
-        
-        Args:
-            temperature_data: 2D numpy array of temperature values
-        """
-        import numpy as np
-        
-        if len(self.points) < 3:
-            self.temp_min = self.temp_max = self.temp_mean = self.temp_std = self.temp_median = None
-            return
-        
-        # Get the bounds of the polygon
-        x1, y1, x2, y2 = self.get_bounds()
-        
-        # Get integer bounds for array indexing
-        x1, y1 = int(x1), int(y1)
-        x2, y2 = int(x2), int(y2)
-        
-        # Ensure bounds are within array limits
-        height, width = temperature_data.shape
-        x1, x2 = max(0, x1), min(width, x2)
-        y1, y2 = max(0, y1), min(height, y2)
-        
-        if x1 >= x2 or y1 >= y2:
-            self.temp_min = self.temp_max = self.temp_mean = self.temp_std = self.temp_median = None
-            return
-        
-        # Create a mask for the polygonal area
-        y_indices, x_indices = np.meshgrid(np.arange(y1, y2), np.arange(x1, x2), indexing='ij')
-        
-        # Check each pixel if it's inside the polygon
-        mask = np.zeros((y2 - y1, x2 - x1), dtype=bool)
-        for i in range(y2 - y1):
-            for j in range(x2 - x1):
-                mask[i, j] = self.contains_point(x1 + j, y1 + i)
-        
-        # Extract temperatures within the polygonal ROI
-        roi_temps = temperature_data[y1:y2, x1:x2]
-        polygon_temps = roi_temps[mask]
-        
-        # Remove NaN values
-        valid_temps = polygon_temps[~np.isnan(polygon_temps)]
-        
-        if len(valid_temps) == 0:
-            self.temp_min = self.temp_max = self.temp_mean = self.temp_std = self.temp_median = None
-        else:
-            self.temp_min = float(np.min(valid_temps))
-            self.temp_max = float(np.max(valid_temps))
-            self.temp_mean = float(np.mean(valid_temps))
-            self.temp_std = float(np.std(valid_temps))
-            self.temp_median = float(np.median(valid_temps))
     
     def add_point(self, x: float, y: float):
         """Add a point to the polygon."""
