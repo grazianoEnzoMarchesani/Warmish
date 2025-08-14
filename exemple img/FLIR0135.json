@@ -8,8 +8,8 @@
     "ObjectDistance": 3.469,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "Jet",
-  "palette_inverted": false,
+  "palette": "BrBG",
+  "palette_inverted": true,
   "overlay_settings": {
     "scale": 0.7371037717330103,
     "offset_x": -10,
@@ -30,8 +30,8 @@
       "type": "RectROI",
       "name": "ROI_1",
       "emissivity": 0.95,
-      "x": 150,
-      "y": 152,
+      "x": 150.0,
+      "y": 152.0,
       "width": 47.73841961852861,
       "height": 67.35694822888283
     },

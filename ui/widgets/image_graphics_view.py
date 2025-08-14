@@ -937,13 +937,16 @@ class ImageGraphicsView(QGraphicsView):
         """
         return self._roi_label_settings
         
-    def export_overlay_image(self, file_path: str, force_overlay: bool = False) -> bool:
+    def export_overlay_image(self, file_path: str, force_overlay: bool = False, 
+                           thermal_engine=None, include_legend: bool = True) -> bool:
         """
         Export overlay composition, optionally forcing overlay mode.
         
         Args:
             file_path (str): Path where to save the exported image.
             force_overlay (bool): If True, temporarily enable overlay mode for export.
+            thermal_engine: ThermalEngine instance for adding legend (optional).
+            include_legend (bool): Whether to include the color legend (default True).
             
         Returns:
             bool: True if export was successful, False otherwise.
@@ -956,6 +959,8 @@ class ImageGraphicsView(QGraphicsView):
             # Debug: Print current state
             print(f"🔍 Export overlay debug:")
             print(f"  - Force overlay: {force_overlay}")
+            print(f"  - Include legend: {include_legend}")
+            print(f"  - Thermal engine provided: {thermal_engine is not None}")
             print(f"  - Current overlay mode: {self._overlay_mode}")
             print(f"  - Current overlay alpha: {self._overlay_alpha}")
             print(f"  - Visible pixmap null: {self._visible_item.pixmap().isNull()}")
@@ -1093,6 +1098,38 @@ class ImageGraphicsView(QGraphicsView):
                     self._scene.render(painter, QRectF(0, 0, scene_rect.width(), scene_rect.height()), scene_rect)
                     
                     painter.end()
+                    
+                    # Add legend if requested and thermal engine is available
+                    if include_legend and thermal_engine is not None:
+                        print("🎨 Adding legend to overlay export...")
+                        
+                        # Get current palette settings from thermal engine or default values
+                        try:
+                            # Try to get the current palette from the parent window or use defaults
+                            palette_name = getattr(thermal_engine, '_current_palette', 'Iron')
+                            inverted = getattr(thermal_engine, '_current_inverted', False)
+                            
+                            # If we can access the parent window, get the actual settings
+                            parent_widget = self.parent()
+                            while parent_widget and not hasattr(parent_widget, 'selected_palette'):
+                                parent_widget = parent_widget.parent()
+                            
+                            if parent_widget and hasattr(parent_widget, 'selected_palette'):
+                                palette_name = parent_widget.selected_palette
+                                inverted = parent_widget.palette_inverted
+                                print(f"  - Using palette from main window: {palette_name}, inverted: {inverted}")
+                            else:
+                                print(f"  - Using default palette: {palette_name}, inverted: {inverted}")
+                            
+                            # Use the thermal engine's combine method
+                            export_pixmap = thermal_engine._combine_image_with_legend(
+                                export_pixmap, palette_name, inverted, scale_factor
+                            )
+                            print("✅ Legend added to overlay export")
+                            
+                        except Exception as e:
+                            print(f"⚠️ Could not add legend to overlay: {e}")
+                            # Continue without legend
                     
                     # Save the exported image
                     success = export_pixmap.save(file_path, "PNG")

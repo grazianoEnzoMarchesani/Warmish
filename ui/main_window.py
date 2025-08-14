@@ -2295,7 +2295,8 @@ class ThermalAnalyzerNG(QMainWindow):
                 return False
                 
             return self.thermal_engine.export_thermal_image(
-                file_path, self.selected_palette, self.palette_inverted
+                file_path, self.selected_palette, self.palette_inverted, 
+                include_legend=True
             )
         except Exception as e:
             print(f"Error exporting thermal image: {e}")
@@ -2322,7 +2323,7 @@ class ThermalAnalyzerNG(QMainWindow):
 
     def _export_overlay_image(self, file_path: str) -> bool:
         """
-        Export overlay composition, forcing overlay mode if both visible and thermal images are available.
+        Export overlay composition showing both visible and thermal images.
         
         Args:
             file_path (str): Path where to save the overlay image.
@@ -2331,10 +2332,10 @@ class ThermalAnalyzerNG(QMainWindow):
             bool: True if export was successful, False otherwise.
         """
         try:
-            if not hasattr(self, 'image_view'):
+            if not hasattr(self, 'thermal_engine'):
                 return False
-                
-            # Check if we have BOTH visible and thermal images to create overlay
+            
+            # Check if we have both visible and thermal data
             has_visible = (hasattr(self, 'thermal_engine') and 
                           self.thermal_engine.base_pixmap_visible is not None and 
                           not self.thermal_engine.base_pixmap_visible.isNull())
@@ -2343,6 +2344,14 @@ class ThermalAnalyzerNG(QMainWindow):
                           self.thermal_engine.base_pixmap is not None and 
                           not self.thermal_engine.base_pixmap.isNull())
             
+            print(f"🔍 Overlay export check:")
+            print(f"  - Has visible image: {has_visible}")
+            print(f"  - Has thermal image: {has_thermal}")
+            
+            if not has_thermal:
+                print("❌ No thermal image available for overlay export")
+                return False
+            
             # Force overlay only if BOTH images are available
             force_overlay = has_visible and has_thermal
             
@@ -2350,15 +2359,12 @@ class ThermalAnalyzerNG(QMainWindow):
                 print("🎭 Forcing overlay mode for export (both visible and thermal images available)")
                 
                 # Ensure the visible image is loaded in the view before export
-                # This is crucial when overlay mode has been disabled - the visible image
-                # might not be loaded in the graphics view even if it exists in thermal_engine
                 if (self.image_view._visible_item.pixmap().isNull() and 
                     self.thermal_engine.base_pixmap_visible is not None):
                     print("📷 Loading visible image into view for overlay export")
                     self.image_view.set_visible_pixmap(self.thermal_engine.base_pixmap_visible)
                 
                 # Apply current overlay settings before export
-                # This ensures correct scale, offset, and alpha are applied
                 print(f"🔧 Applying overlay settings for export:")
                 print(f"  - Scale: {self.overlay_scale}")
                 print(f"  - Offset: ({self.overlay_offset_x}, {self.overlay_offset_y})")
@@ -2378,13 +2384,20 @@ class ThermalAnalyzerNG(QMainWindow):
                 )
             
             else:
-                print("⚠️ Cannot create true overlay - missing images:")
-                print(f"  - Visible image: {'✓' if has_visible else '✗'}")
-                print(f"  - Thermal image: {'✓' if has_thermal else '✗'}")
+                print("ℹ️ Exporting thermal-only overlay (no visible image available)")
             
-            return self.image_view.export_overlay_image(file_path, force_overlay=force_overlay)
+            # Export with legend support
+            return self.image_view.export_overlay_image(
+                file_path, 
+                force_overlay=force_overlay, 
+                thermal_engine=self.thermal_engine,
+                include_legend=True  # Always include legend for thermal images
+            )
+            
         except Exception as e:
             print(f"Error exporting overlay image: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def _export_thermal_with_rois(self, file_path: str) -> bool:
@@ -2406,7 +2419,7 @@ class ThermalAnalyzerNG(QMainWindow):
             print(f"  📊 Total ROI items: {len(self.roi_items)}")
             for roi_id, roi_item in self.roi_items.items():
                 try:
-                    if hasattr(roi_item, 'model'):  # CORRECTED: use 'model' instead of 'roi_model'
+                    if hasattr(roi_item, 'model'):
                         roi_model = roi_item.model
                         print(f"    • {roi_id}: {roi_model.name} ({roi_model.__class__.__name__})")
                         print(f"      Position: ({roi_model.x:.1f}, {roi_model.y:.1f})")
@@ -2418,7 +2431,8 @@ class ThermalAnalyzerNG(QMainWindow):
                     print(f"    • {roi_id}: Error accessing ROI - {e}")
                 
             return self.thermal_engine.export_thermal_with_rois(
-                file_path, self.selected_palette, self.palette_inverted, self.roi_items
+                file_path, self.selected_palette, self.palette_inverted, self.roi_items,
+                include_legend=True
             )
         except Exception as e:
             print(f"Error exporting thermal image with ROIs: {e}")

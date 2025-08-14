@@ -1,20 +1,20 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 1.0,
-    "AtmosphericTemperature": 3333.0,
-    "AtmosphericTransmission": 3.0,
+    "Emissivity": 0.3,
+    "AtmosphericTemperature": 20.0,
+    "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5,
-    "ObjectDistance": 1.0,
-    "ReflectedApparentTemperature": 20.0
+    "ObjectDistance": 3.0,
+    "ReflectedApparentTemperature": 24.999994
   },
-  "palette": "Fire",
-  "palette_inverted": true,
+  "palette": "BrBG",
+  "palette_inverted": false,
   "overlay_settings": {
     "scale": 0.731,
     "offset_x": -112,
     "offset_y": -42,
-    "opacity": 50,
+    "opacity": 100,
     "blend_mode": "Normal"
   },
   "roi_label_settings": {
@@ -42,6 +42,29 @@
       "y": 216.45776566757493,
       "width": 137.3297002724795,
       "height": 227.574931880109
+    },
+    {
+      "type": "PolygonROI",
+      "name": "Polygon_1",
+      "emissivity": 0.95,
+      "points": [
+        [
+          258.5286103542234,
+          175.91280653950952
+        ],
+        [
+          246.7574931880109,
+          126.21253405994551
+        ],
+        [
+          390.6267029972752,
+          128.82833787465938
+        ],
+        [
+          258.5286103542234,
+          175.91280653950952
+        ]
+      ]
     }
   ]
 }

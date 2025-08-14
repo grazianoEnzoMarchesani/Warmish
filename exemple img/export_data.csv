@@ -1,5 +1,5 @@
 # Thermal Analysis Export
-# Generated on,2025-08-14 23:47:41
+# Generated on,2025-08-15 00:18:17
 
 Original Image,FLIR0135.jpg
 
@@ -25,8 +25,8 @@ global_temp_std_dev_celsius,3.84
 total_pixel_count,76800.00
 
 # Visualization Settings
-Color Palette,Jet
-Palette Inverted,False
+Color Palette,BrBG
+Palette Inverted,True
 Overlay Mode,False
 
 # ROI Analysis Data
