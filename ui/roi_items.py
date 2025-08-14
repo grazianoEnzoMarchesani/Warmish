@@ -159,13 +159,18 @@ class RectROIItem(QGraphicsRectItem):
         """
         if change == QGraphicsItem.ItemPositionHasChanged:
             # Update the model coordinates when the item is moved
-            new_position = value
-            self.model.x = int(new_position.x())
-            self.model.y = int(new_position.y())
+            offset = value
+            # Update all points in the model
+            original_polygon = self.polygon()
+            for i, point in enumerate(self.model.points):
+                new_point = original_polygon[i] + offset
+                self.model.points[i] = (new_point.x(), new_point.y())
+            
+            # NOTE: Don't notify during movement to avoid continuous temperature 
+            # recalculations. The notification will be sent only when the movement
+            # is completed in mouseReleaseEvent().
         
-        # Call parent implementation
         return super().itemChange(change, value)
-    
     def update_from_model(self):
         """
         Update the graphical representation from the model data.
@@ -907,6 +912,9 @@ class PolygonROIItem(QGraphicsPolygonItem):
         self._selected_vertex = -1
         self._vertex_radius = 5  # Radius of vertex circles
         
+        # Movement state tracking for optimization
+        self._is_moving = False  # Track if the entire ROI is being moved
+        
         # Enhanced visual feedback
         self._show_vertices = False
         self._hovered_vertex = -1
@@ -1019,12 +1027,14 @@ class PolygonROIItem(QGraphicsPolygonItem):
                 new_point = original_polygon[i] + offset
                 self.model.points[i] = (new_point.x(), new_point.y())
             
-            # Notify about the change using the new signal-based approach
-            view_list = self.scene().views()
-            if view_list:
-                view = view_list[0]
-                if hasattr(view, "notify_roi_modified"):
-                    view.notify_roi_modified(self.model)
+            # Only notify about the change if we're not currently moving
+            # This prevents continuous temperature calculations during drag
+            if not self._is_moving:
+                view_list = self.scene().views()
+                if view_list:
+                    view = view_list[0]
+                    if hasattr(view, "notify_roi_modified"):
+                        view.notify_roi_modified(self.model)
         
         return super().itemChange(change, value)
     
@@ -1121,6 +1131,9 @@ class PolygonROIItem(QGraphicsPolygonItem):
                 self.prepareGeometryChange()
                 event.accept()
                 return
+            else:
+                # Starting to move the entire ROI
+                self._is_moving = True
         
         super().mousePressEvent(event)
 
@@ -1162,16 +1175,19 @@ class PolygonROIItem(QGraphicsPolygonItem):
         if self._editing_vertices and event.button() == Qt.LeftButton:
             self._editing_vertices = False
             self._selected_vertex = -1
-            # Notify model changed
+            # Notify model changed after vertex editing
             self._notify_model_changed()
             # Final update to clean any artifacts
             self.update()
             event.accept()
             return
         
-        # If it was a simple move, recalculate here
-        if event.button() == Qt.LeftButton:
+        # Handle end of ROI movement
+        if event.button() == Qt.LeftButton and self._is_moving:
+            self._is_moving = False
+            # Now trigger temperature recalculation after movement is complete
             self._notify_model_changed()
+            
         super().mouseReleaseEvent(event)
 
     def _notify_model_changed(self):

@@ -4,15 +4,34 @@
     "Emissivity": 1.0,
     "AtmosphericTemperature": 3333.0,
     "AtmosphericTransmission": 3.0,
-    "RelativeHumidity": 0.5
+    "RelativeHumidity": 0.5,
+    "ObjectDistance": 1.0,
+    "ReflectedApparentTemperature": 20.0
+  },
+  "palette": "Fire",
+  "palette_inverted": true,
+  "overlay_settings": {
+    "scale": 0.731,
+    "offset_x": -112,
+    "offset_y": -42,
+    "opacity": 50,
+    "blend_mode": "Normal"
+  },
+  "roi_label_settings": {
+    "name": true,
+    "emissivity": true,
+    "min": true,
+    "max": true,
+    "avg": true,
+    "median": false
   },
   "rois": [
     {
       "type": "RectROI",
       "name": "ROI_1",
       "emissivity": 0.1,
-      "x": 389,
-      "y": 70,
+      "x": 303,
+      "y": 83,
       "width": 128.90025575447572,
       "height": 136.26598465473145
     },
@@ -22,20 +41,20 @@
       "emissivity": 0.95,
       "points": [
         [
-          544.4473403625162,
-          250.0350529976236
+          454.2021087548869,
+          9.381102043945134
         ],
         [
-          634.0637086489613,
-          356.83812205133205
+          543.818477041332,
+          116.18417109765358
         ],
         [
-          557.9511766796518,
-          498.01459263956735
+          467.7059450720225,
+          257.3606416858889
         ],
         [
-          544.4473403625162,
-          250.0350529976236
+          454.2021087548869,
+          9.381102043945134
         ]
       ]
     },
@@ -90,8 +109,8 @@
       "type": "SpotROI",
       "name": "Spot_7",
       "emissivity": 0.95,
-      "x": 521.41689373297,
-      "y": 362.9427792915531,
+      "x": 457.3297002724796,
+      "y": 386.4850136239782,
       "radius": 66.23978201634873
     },
     {
@@ -102,15 +121,29 @@
       "y": 318,
       "width": 91.55313351498637,
       "height": 73.24250681198913
+    },
+    {
+      "type": "PolygonROI",
+      "name": "Polygon_1",
+      "emissivity": 0.95,
+      "points": [
+        [
+          368.3923705722071,
+          294.9318801089918
+        ],
+        [
+          441.63487738419616,
+          296.2397820163487
+        ],
+        [
+          377.5476839237057,
+          415.25885558583104
+        ],
+        [
+          368.3923705722071,
+          294.9318801089918
+        ]
+      ]
     }
-  ],
-  "palette": "Fire",
-  "palette_inverted": true,
-  "overlay_settings": {
-    "scale": 0.731,
-    "offset_x": -112,
-    "offset_y": -42,
-    "opacity": 50,
-    "blend_mode": "Normal"
-  }
+  ]
 }
