@@ -56,18 +56,11 @@ class ThermalAnalyzerNG(QMainWindow):
         self.setWindowTitle("Warmish")
         self.setGeometry(100, 100, 1400, 900)
         
-        # Initialize toolbar and actions
         self._setup_toolbar()
-        
-        # Initialize UI state variables
         self._init_state_variables()
-        
-        # Setup main layout and widgets
         self._setup_main_layout()
         self._setup_image_views()
         self._setup_sidebar_tabs()
-        
-        # Initialize data storage
         self._init_data_storage()
         
     def _setup_toolbar(self):
@@ -76,7 +69,6 @@ class ThermalAnalyzerNG(QMainWindow):
         self.addToolBar(Qt.TopToolBarArea, self.toolbar)
         self.toolbar.setMovable(False)
         
-        # File operations
         self.action_open = QAction(QIcon(), "Load Image", self)
         self.action_open.triggered.connect(self.open_image)
         self.toolbar.addAction(self.action_open)
@@ -85,13 +77,8 @@ class ThermalAnalyzerNG(QMainWindow):
         self.toolbar.addAction(self.action_export)
         self.toolbar.addSeparator()
         
-        # Palette selection
         self._setup_palette_controls()
-        
-        # Overlay controls
         self._setup_overlay_controls()
-        
-        # Zoom controls
         self._setup_zoom_controls()
         
     def _setup_palette_controls(self):
@@ -121,13 +108,11 @@ class ThermalAnalyzerNG(QMainWindow):
         self.action_overlay_view.toggled.connect(self.on_overlay_toggled)
         self.toolbar.addAction(self.action_overlay_view)
         
-        # Create overlay controls widget
         self.overlay_controls_widget = QWidget()
         _ovl = QHBoxLayout(self.overlay_controls_widget)
         _ovl.setContentsMargins(0, 0, 0, 0)
         _ovl.setSpacing(6)
         
-        # Opacity control
         from PySide6.QtWidgets import QLabel as _QLabel
         _ovl.addWidget(_QLabel("Opacity"))
         self.overlay_alpha_slider = QSlider(Qt.Horizontal)
@@ -140,7 +125,6 @@ class ThermalAnalyzerNG(QMainWindow):
         self.overlay_alpha_slider.valueChanged.connect(self.on_overlay_alpha_changed)
         _ovl.addWidget(self.overlay_alpha_slider)
         
-        # Scale control
         self.scale_spin = QDoubleSpinBox()
         self.scale_spin.setDecimals(3)
         self.scale_spin.setRange(0.100, 5.000)
@@ -151,7 +135,6 @@ class ThermalAnalyzerNG(QMainWindow):
         self.scale_spin.valueChanged.connect(self.on_scale_spin_changed)
         _ovl.addWidget(self.scale_spin)
         
-        # Offset controls
         self.offsetx_spin = QSpinBox()
         self.offsetx_spin.setRange(-2000, 2000)
         self.offsetx_spin.setSingleStep(1)
@@ -168,7 +151,6 @@ class ThermalAnalyzerNG(QMainWindow):
         self.offsety_spin.valueChanged.connect(self.on_offsety_changed)
         _ovl.addWidget(self.offsety_spin)
         
-        # Blend mode control
         self.blend_combo = QComboBox()
         self.blend_combo.addItems([
             "Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten",
@@ -182,7 +164,6 @@ class ThermalAnalyzerNG(QMainWindow):
         
         self.overlay_action = self.toolbar.addWidget(self.overlay_controls_widget)
         
-        # Reset alignment action
         self.action_reset_align = QAction("Reset Alignment", self)
         self.action_reset_align.setToolTip("Restore scale and offset from metadata")
         self.action_reset_align.triggered.connect(self.on_reset_alignment)
@@ -206,7 +187,7 @@ class ThermalAnalyzerNG(QMainWindow):
         self.toolbar.addAction(self.action_zoom_reset)
         self.toolbar.addSeparator()
         
-        # Add spacer widget
+        # Spacer to push other toolbar elements to the left
         self.toolbar.addWidget(QWidget())
         self.toolbar.widgetForAction(self.toolbar.actions()[-1]).setSizePolicy(
             QSP.Expanding, QSP.Preferred
@@ -1075,6 +1056,84 @@ class ThermalAnalyzerNG(QMainWindow):
         except (ValueError, TypeError):
             return float(default_value)
 
+    def _calculate_temperatures_from_raw(self, raw_data, emissivity, debug=False):
+        """
+        Calculate temperatures from raw thermal data using Planck equation.
+        
+        This private method contains the core thermal calculation logic that applies
+        the Planck equation with emissivity and environmental parameters to convert
+        raw thermal sensor values to calibrated temperatures in Celsius.
+        
+        Args:
+            raw_data (np.ndarray): Raw thermal data from sensor.
+            emissivity (float): Emissivity value for the calculation.
+            debug (bool): Whether to print debug information.
+            
+        Returns:
+            np.ndarray: Calculated temperatures in Celsius (before environmental correction).
+        """
+        try:
+            # Extract calculation parameters from UI
+            refl_temp_C = float(self.param_inputs["ReflectedApparentTemperature"].text())
+            R1 = float(self.param_inputs["PlanckR1"].text())
+            R2 = float(self.param_inputs["PlanckR2"].text())
+            B = float(self.param_inputs["PlanckB"].text())
+            F = float(self.param_inputs["PlanckF"].text())
+            O = float(self.param_inputs["PlanckO"].text())
+            
+            refl_temp_K = refl_temp_C + 273.15  # Convert to Kelvin
+            
+            if debug:
+                print(f"🔍 Debug Planck parameters:")
+                print(f"  R1={R1}, R2={R2}, B={B}, F={F}, O={O}")
+                print(f"  Emissivity={emissivity}, ReflTemp={refl_temp_C}°C")
+            
+            # Calculate reflected temperature component
+            raw_refl = R1 / (R2 * (np.exp(B / refl_temp_K) - F)) - O
+            if debug:
+                print(f"  raw_refl range: {np.nanmin(raw_refl):.3f} to {np.nanmax(raw_refl):.3f}")
+            
+            # Apply emissivity correction
+            raw_obj = (raw_data - (1 - emissivity) * raw_refl) / max(emissivity, 1e-6)
+            if debug:
+                print(f"  raw_obj range: {np.nanmin(raw_obj):.3f} to {np.nanmax(raw_obj):.3f}")
+            
+            # Prepare for logarithm calculation
+            log_arg = R1 / (R2 * (raw_obj + O)) + F
+            if debug:
+                print(f"  log_arg range: {np.nanmin(log_arg):.3f} to {np.nanmax(log_arg):.3f}")
+            
+            # Check validity of logarithm arguments
+            if debug:
+                valid_indices = log_arg > 0
+                valid_count = np.sum(valid_indices)
+                total_count = log_arg.size
+                print(f"  Pixels valid for logarithm: {valid_count}/{total_count} ({100*valid_count/total_count:.1f}%)")
+                
+                if valid_count == 0:
+                    print("❌ ERROR: No pixels have log_arg > 0 - all values will be NaN!")
+                    print("   Possible causes:")
+                    print("   - Incorrect Planck parameters")
+                    print("   - Emissivity too low")
+                    print("   - Corrupted raw thermal data")
+            
+            # Apply Planck equation to calculate temperature
+            temp_K = np.full(log_arg.shape, np.nan, dtype=np.float64)
+            valid_indices = log_arg > 0
+            temp_K[valid_indices] = B / np.log(log_arg[valid_indices])
+            
+            if debug:
+                print(f"  temp_K range: {np.nanmin(temp_K):.3f} to {np.nanmax(temp_K):.3f}")
+            
+            # Convert to Celsius
+            temp_celsius = temp_K - 273.15
+            return temp_celsius
+            
+        except Exception as e:
+            print(f"Error in Planck calculation: {e}")
+            # Return NaN array on error
+            return np.full(raw_data.shape, np.nan, dtype=np.float64)
+
     def calculate_temperature_matrix(self):
         """
         Calculate temperature matrix from raw thermal data using Planck equation.
@@ -1090,55 +1149,15 @@ class ThermalAnalyzerNG(QMainWindow):
         - Environmental corrections
         """
         try:
-            # Extract calculation parameters from UI
+            # Extract emissivity from UI
             emissivity = float(self.param_inputs["Emissivity"].text())
-            refl_temp_C = float(self.param_inputs["ReflectedApparentTemperature"].text())
-            R1 = float(self.param_inputs["PlanckR1"].text())
-            R2 = float(self.param_inputs["PlanckR2"].text())
-            B = float(self.param_inputs["PlanckB"].text())
-            F = float(self.param_inputs["PlanckF"].text())
-            O = float(self.param_inputs["PlanckO"].text())
             
-            refl_temp_K = refl_temp_C + 273.15  # Convert to Kelvin
+            # Calculate temperatures using the refactored method
+            temp_celsius = self._calculate_temperatures_from_raw(
+                self.thermal_data, emissivity, debug=True
+            )
             
-            print(f"🔍 Debug Planck parameters:")
-            print(f"  R1={R1}, R2={R2}, B={B}, F={F}, O={O}")
-            print(f"  Emissivity={emissivity}, ReflTemp={refl_temp_C}°C")
-            
-            # Calculate reflected temperature component
-            raw_refl = R1 / (R2 * (np.exp(B / refl_temp_K) - F)) - O
-            print(f"  raw_refl range: {np.nanmin(raw_refl):.3f} to {np.nanmax(raw_refl):.3f}")
-            
-            # Apply emissivity correction
-            raw_obj = (self.thermal_data - (1 - emissivity) * raw_refl) / max(emissivity, 1e-6)
-            print(f"  raw_obj range: {np.nanmin(raw_obj):.3f} to {np.nanmax(raw_obj):.3f}")
-            
-            # Prepare for logarithm calculation
-            log_arg = R1 / (R2 * (raw_obj + O)) + F
-            print(f"  log_arg range: {np.nanmin(log_arg):.3f} to {np.nanmax(log_arg):.3f}")
-            
-            # Check validity of logarithm arguments
-            valid_indices = log_arg > 0
-            valid_count = np.sum(valid_indices)
-            total_count = log_arg.size
-            print(f"  Pixels valid for logarithm: {valid_count}/{total_count} ({100*valid_count/total_count:.1f}%)")
-            
-            if valid_count == 0:
-                print("❌ ERROR: No pixels have log_arg > 0 - all values will be NaN!")
-                print("   Possible causes:")
-                print("   - Incorrect Planck parameters")
-                print("   - Emissivity too low")
-                print("   - Corrupted raw thermal data")
-            
-            # Apply Planck equation to calculate temperature
-            temp_K = np.full(log_arg.shape, np.nan, dtype=np.float64)
-            valid_indices = log_arg > 0
-            temp_K[valid_indices] = B / np.log(log_arg[valid_indices])
-            
-            print(f"  temp_K range: {np.nanmin(temp_K):.3f} to {np.nanmax(temp_K):.3f}")
-            
-            # Convert to Celsius and apply environmental corrections
-            temp_celsius = temp_K - 273.15
+            # Apply environmental corrections
             self.temperature_data = self.apply_environmental_correction(temp_celsius)
             
             # Handle edge cases and calculate temperature range
@@ -1164,7 +1183,7 @@ class ThermalAnalyzerNG(QMainWindow):
             # Fallback to zero data
             self.temperature_data = np.zeros_like(self.thermal_data, dtype=float)
             self.temp_min, self.temp_max = 0, 0
-    
+
     def create_colored_pixmap(self):
         """
         Create a colored pixmap from temperature data using the selected palette.
@@ -1871,7 +1890,7 @@ class ThermalAnalyzerNG(QMainWindow):
         if self.thermal_data is None or not hasattr(self, "image_view"):
             return None
             
-        # Handle different ROI types
+        # Handle different ROI types and extract thermal data
         if isinstance(roi, SpotROI):
             # Circular ROI processing
             h, w = self.thermal_data.shape
@@ -1934,26 +1953,11 @@ class ThermalAnalyzerNG(QMainWindow):
 
             thermal_roi = self.thermal_data[y1:y2, x1:x2].astype(np.float64)
             
-        # Apply thermal calculation with ROI-specific emissivity
+        # Apply thermal calculation with ROI-specific emissivity using refactored method
         emissivity = float(getattr(roi, 'emissivity', 0.95))
-        refl_temp_C = float(self.param_inputs["ReflectedApparentTemperature"].text())
-        R1 = float(self.param_inputs["PlanckR1"].text())
-        R2 = float(self.param_inputs["PlanckR2"].text())
-        B  = float(self.param_inputs["PlanckB"].text())
-        F  = float(self.param_inputs["PlanckF"].text())
-        O  = float(self.param_inputs["PlanckO"].text())
-
-        # Apply Planck equation with ROI emissivity
-        refl_temp_K = refl_temp_C + 273.15
-        raw_refl = R1 / (R2 * (np.exp(B / refl_temp_K) - F)) - O
-        raw_obj = (thermal_roi - (1 - emissivity) * raw_refl) / max(emissivity, 1e-6)
-
-        log_arg = R1 / (R2 * (raw_obj + O)) + F
-        temp_K = np.full(log_arg.shape, np.nan, dtype=np.float64)
-        valid = log_arg > 0
-        temp_K[valid] = B / np.log(log_arg[valid])
+        temp_celsius = self._calculate_temperatures_from_raw(thermal_roi, emissivity, debug=False)
         
-        temp_celsius = temp_K - 273.15
+        # Apply environmental corrections and return
         return self.apply_environmental_correction(temp_celsius)
 
     def update_single_roi(self, roi_model):
