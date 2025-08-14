@@ -1,13 +1,14 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.6,
+    "Emissivity": 0.98,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
-    "RelativeHumidity": 0.5
+    "RelativeHumidity": 0.5,
+    "ObjectDistance": 1.0,
+    "ReflectedApparentTemperature": 19.999994
   },
-  "rois": [],
-  "palette": "Purples",
+  "palette": "Autumn",
   "palette_inverted": true,
   "overlay_settings": {
     "scale": 0.741,
@@ -15,5 +16,23 @@
     "offset_y": -27,
     "opacity": 50,
     "blend_mode": "Normal"
-  }
+  },
+  "roi_label_settings": {
+    "name": true,
+    "emissivity": true,
+    "min": true,
+    "max": true,
+    "avg": true,
+    "median": false
+  },
+  "rois": [
+    {
+      "type": "SpotROI",
+      "name": "Spot_1",
+      "emissivity": 0.95,
+      "x": 118.80108991825614,
+      "y": 119.34604904632153,
+      "radius": 72.12534059945506
+    }
+  ]
 }
