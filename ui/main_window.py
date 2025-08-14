@@ -9,14 +9,10 @@ FLIR thermal images with advanced ROI (Region of Interest) capabilities.
 import os
 
 import json
-import subprocess
-import io
 import numpy as np
 
 
 # Third-party imports
-import exiftool
-from PIL import Image
 
 import matplotlib.cm as cm
 

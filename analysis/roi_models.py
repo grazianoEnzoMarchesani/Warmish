@@ -1,8 +1,8 @@
 # analysis/roi_models.py
 import uuid
 import math
-from typing import Optional, Union
-import numpy as np
+from typing import Optional
+
 
 
 
