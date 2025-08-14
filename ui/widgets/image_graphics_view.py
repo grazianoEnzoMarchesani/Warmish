@@ -4,56 +4,82 @@ from PySide6.QtCore import Qt, QPointF, Signal, QRectF
 from PySide6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QTransform, QPen, QBrush, QColor, QPolygonF
 
 
-
 class BlendablePixmapItem(QGraphicsPixmapItem):
-    """QGraphicsPixmapItem personalizzato che supporta blend modes."""
+    """Custom QGraphicsPixmapItem that supports blend modes.
+    
+    Extends the standard QGraphicsPixmapItem to allow different composition
+    modes when rendering, enabling visual effects like overlay blending.
+    """
     
     def __init__(self, parent=None):
+        """Initialize the blendable pixmap item.
+        
+        Args:
+            parent: Parent graphics item, defaults to None.
+        """
         super().__init__(parent)
         self._blend_mode = QPainter.CompositionMode_SourceOver
         
     def set_blend_mode(self, mode: QPainter.CompositionMode):
-        """Imposta il blend mode per questo item."""
+        """Set the blend mode for this item.
+        
+        Args:
+            mode (QPainter.CompositionMode): The composition mode to use for blending.
+        """
         self._blend_mode = mode
         self.update()
     
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget=None):
-        """Override del metodo paint per applicare il blend mode."""
+        """Override the paint method to apply the custom blend mode.
+        
+        Args:
+            painter (QPainter): The painter to use for rendering.
+            option (QStyleOptionGraphicsItem): Style options for the item.
+            widget: The widget being painted on, defaults to None.
+        """
         if self.pixmap().isNull():
             return
             
-        # Salva lo stato corrente del painter
+        # Store current state to restore after custom blending
         old_composition_mode = painter.compositionMode()
         
-        # Applica il blend mode
+        # Apply the custom blend mode
         painter.setCompositionMode(self._blend_mode)
         
-        # Chiama il paint della classe base
+        # Call parent paint with custom mode
         super().paint(painter, option, widget)
         
-        # Ripristina lo stato del painter
+        # Restore original painter state
         painter.setCompositionMode(old_composition_mode)
 
 
 class ImageGraphicsView(QGraphicsView):
-    """
-    Vista custom basata su QGraphicsView per visualizzare e gestire immagini termiche
-    con zoom, pan e overlay automatici.
+    """Custom graphics view for displaying and managing thermal images.
+    
+    Provides functionality for viewing thermal images with zoom, pan, and overlay
+    capabilities. Supports drawing different types of ROI (Region of Interest)
+    including rectangles, spots, and polygons.
+    
+    Signals:
+        mouse_moved_on_thermal (QPointF): Emitted when mouse moves over thermal image.
+        view_transformed (float, QPointF, tuple): Emitted when view changes (zoom, pan).
+        roi_created (QRectF): Emitted when a ROI is completed.
     """
     
-    # Segnali esistenti
+    # Signals for thermal image interaction
     mouse_moved_on_thermal = Signal(QPointF)
-    
-    # Segnale aggiornato per includere dimensioni pixmap
     view_transformed = Signal(float, QPointF, tuple)  # zoom_factor, pan_offset, pixmap_size
-    
-    # Nuovo segnale per ROI creati
-    roi_created = Signal(QRectF)  # Emesso quando un ROI viene completato
+    roi_created = Signal(QRectF)  # Emitted when a ROI is completed
     
     def __init__(self, parent: Optional[QWidget] = None):
+        """Initialize the image graphics view.
+        
+        Args:
+            parent (QWidget, optional): Parent widget, defaults to None.
+        """
         super().__init__(parent)
         
-        # Configurazione base della vista
+        # Configure view settings for optimal image display
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setRenderHint(QPainter.Antialiasing)
         self.setRenderHint(QPainter.SmoothPixmapTransform)
@@ -62,87 +88,106 @@ class ImageGraphicsView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
-        # Inizializza la scena
+        # Initialize scene
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         
-        # Items grafici per le immagini
-        self._thermal_item = BlendablePixmapItem()  # <-- Usa la classe personalizzata
+        # Graphics items for images (order matters: visible below, thermal above)
+        self._thermal_item = BlendablePixmapItem()
         self._visible_item = QGraphicsPixmapItem()
         
-        # Aggiungi gli items alla scena (ordine importante: visibile sotto, termica sopra)
         self._scene.addItem(self._visible_item)
         self._scene.addItem(self._thermal_item)
         
-        # Configurazione overlay
+        # Overlay configuration
         self._overlay_mode = False
         self._overlay_alpha = 0.5
         self._overlay_scale = 1.0
         self._overlay_offset = QPointF(0, 0)
         self._blend_mode = QPainter.CompositionMode_SourceOver
         
-        # Stato zoom e pan
+        # Zoom and pan state
         self._zoom_factor = 1.0
         self._min_zoom = 0.1
         self._max_zoom = 10.0
         self._pan_active = False
         
-        self._is_sync_source = True  # Per evitare loop di sincronizzazione
+        # Prevent synchronization loops between multiple views
+        self._is_sync_source = True
         
-        # Configurazione mouse tracking
+        # Enable mouse tracking for temperature tooltips
         self.setMouseTracking(True)
         
         # ROI drawing state
-        self._main_window = None  # Reference to main window
+        self._main_window = None
         self._roi_drawing = False
         self._roi_start_pos = None
         self._temp_roi_item = None
-        
-        # Flag per abilitare/disabilitare il disegno ROI
         self._allow_roi_drawing = True
-
-        # State for polygon drawing
+        
+        # Polygon drawing state
         self._polygon_drawing = False
         self._current_polygon_points = []
         self._temp_polygon_item = None
         
-        # Assicura che la vista possa ricevere eventi della tastiera
+        # Enable keyboard input for polygon completion shortcuts
         self.setFocusPolicy(Qt.StrongFocus)
 
     def set_allow_roi_drawing(self, allowed: bool):
+        """Enable or disable ROI drawing capability.
+        
+        Args:
+            allowed (bool): Whether to allow ROI drawing.
+        """
         self._allow_roi_drawing = allowed
 
     def set_thermal_pixmap(self, pixmap: QPixmap):
-        """Imposta l'immagine termica."""
+        """Set the thermal image pixmap.
+        
+        Args:
+            pixmap (QPixmap): The thermal image to display.
+        """
         if pixmap is None or pixmap.isNull():
             self._thermal_item.setPixmap(QPixmap())
             return
             
         self._thermal_item.setPixmap(pixmap)
         
-        # Fit automatico sempre quando si imposta una nuova immagine
+        # Auto-fit when setting new image, unless in overlay mode
         if not self._overlay_mode:
             self._fit_thermal_in_view()
         else:
             self._update_overlay_positioning()
     
     def set_visible_pixmap(self, pixmap: QPixmap):
-        """Imposta l'immagine visibile."""
+        """Set the visible light image pixmap.
+        
+        Args:
+            pixmap (QPixmap): The visible light image to display.
+        """
         if pixmap is None or pixmap.isNull():
             self._visible_item.setPixmap(QPixmap())
             self._visible_item.setVisible(False)
             return
             
         self._visible_item.setPixmap(pixmap)
-        # Non impostare automaticamente visible qui, lo gestisce update_overlay
+        # Don't automatically set visible here, update_overlay handles it
         
-        # Se siamo in modalità overlay, aggiorna il posizionamento
+        # If in overlay mode, update positioning
         if self._overlay_mode:
             self._update_overlay_positioning()
 
     def update_overlay(self, visible: bool, alpha: float = 0.5, scale: float = 1.0, 
                       offset: QPointF = QPointF(0, 0), blend_mode: QPainter.CompositionMode = None):
-        """Aggiorna le impostazioni dell'overlay."""
+        """Update overlay settings for image composition.
+        
+        Args:
+            visible (bool): Whether overlay mode is enabled.
+            alpha (float): Opacity of the thermal overlay (0.0-1.0).
+            scale (float): Scale factor for the thermal image relative to visible (0.1-5.0).
+            offset (QPointF): Pixel offset for thermal image positioning.
+            blend_mode (QPainter.CompositionMode, optional): Composition mode for blending.
+        """
         self._overlay_mode = visible
         self._overlay_alpha = max(0.0, min(1.0, alpha))
         self._overlay_scale = max(0.1, min(5.0, scale))
@@ -150,114 +195,114 @@ class ImageGraphicsView(QGraphicsView):
         
         if blend_mode is not None:
             self._blend_mode = blend_mode
-            # Applica il blend mode all'item termico
+            # Apply blend mode to thermal item
             self._thermal_item.set_blend_mode(blend_mode)
         
         if self._overlay_mode:
-            # In modalità overlay, mostra entrambe le immagini se disponibili
+            # In overlay mode, show both images if available
             self._visible_item.setVisible(not self._visible_item.pixmap().isNull())
             self._thermal_item.setVisible(not self._thermal_item.pixmap().isNull())
             self._thermal_item.setOpacity(self._overlay_alpha)
             
-            # Assicurati che l'ordine Z sia corretto (visibile sotto, termica sopra)
+            # Ensure correct Z-order (visible below, thermal above)
             self._visible_item.setZValue(0)
             self._thermal_item.setZValue(1)
             
             self._update_overlay_positioning()
         else:
-            # In modalità normale, mostra solo la termica
+            # In normal mode, show only thermal image
             self._visible_item.setVisible(False)
             self._thermal_item.setVisible(not self._thermal_item.pixmap().isNull())
             self._thermal_item.setOpacity(1.0)
-            # Ripristina blend mode normale quando non in overlay
+            # Restore normal blend mode when not in overlay
             self._thermal_item.set_blend_mode(QPainter.CompositionMode_SourceOver)
             self._fit_thermal_in_view()
 
     def _fit_thermal_in_view(self):
-        """Adatta l'immagine termica alla vista quando non in modalità overlay."""
+        """Fit thermal image to view when not in overlay mode."""
         if self._thermal_item.pixmap().isNull():
             return
         
-        # Reset della trasformazione dell'item
+        # Reset item transformation
         self._thermal_item.setTransform(QTransform())
         
-        # Posiziona l'immagine termica al centro della scena
+        # Center thermal image in scene
         thermal_rect = self._thermal_item.boundingRect()
         self._thermal_item.setPos(-thermal_rect.width()/2, -thermal_rect.height()/2)
         
-        # Reset della vista e fit dell'immagine
+        # Reset view and fit image
         self.resetTransform()
         self.fitInView(self._thermal_item, Qt.KeepAspectRatio)
         self._zoom_factor = self.transform().m11()
     
     def _update_overlay_positioning(self):
-        """Aggiorna il posizionamento delle immagini in modalità overlay."""
+        """Update image positioning in overlay mode."""
         if not self._overlay_mode:
             return
         
-        # Reset delle trasformazioni
+        # Reset transformations
         self._visible_item.setTransform(QTransform())
         self._thermal_item.setTransform(QTransform())
         
-        # Posiziona l'immagine visibile al centro della scena
+        # Position visible image at scene center
         if not self._visible_item.pixmap().isNull():
             visible_rect = self._visible_item.boundingRect()
             self._visible_item.setPos(-visible_rect.width()/2, -visible_rect.height()/2)
             
-            # Reset della vista e fit dell'immagine visibile
+            # Reset view and fit visible image
             self.resetTransform()
             self.fitInView(self._visible_item, Qt.KeepAspectRatio)
             self._zoom_factor = self.transform().m11()
         
-        # Posiziona e scala l'immagine termica relativa alla visibile
+        # Position and scale thermal image relative to visible
         if not self._thermal_item.pixmap().isNull():
             if not self._visible_item.pixmap().isNull():
-                # Calcola la scala relativa basata sulle dimensioni reali delle immagini
+                # Calculate relative scale based on actual image dimensions
                 thermal_pixmap = self._thermal_item.pixmap()
                 visible_pixmap = self._visible_item.pixmap()
                 
-                # Dimensioni originali
+                # Original dimensions
                 thermal_width = thermal_pixmap.width()
                 thermal_height = thermal_pixmap.height()
                 visible_width = visible_pixmap.width()
                 visible_height = visible_pixmap.height()
                 
-                # Calcola il rapporto di scala "naturale" se le immagini fossero della stessa dimensione
+                # Calculate "natural" scale ratio if images were same size
                 natural_scale_x = visible_width / thermal_width if thermal_width > 0 else 1.0
                 natural_scale_y = visible_height / thermal_height if thermal_height > 0 else 1.0
                 natural_scale = min(natural_scale_x, natural_scale_y)
                 
-                # Applica la scala dell'utente moltiplicata per la scala naturale
+                # Apply user scale multiplied by natural scale
                 final_scale = self._overlay_scale * natural_scale
                 
-                # Applica la trasformazione
+                # Apply transformation
                 transform = QTransform()
                 transform.scale(final_scale, final_scale)
                 self._thermal_item.setTransform(transform)
                 
-                # Calcola gli offset in coordinate della scena
+                # Calculate offsets in scene coordinates
                 thermal_rect = self._thermal_item.boundingRect()
                 scaled_thermal_rect = transform.mapRect(thermal_rect)
                 
-                # Gli offset sono forniti in pixel dell'immagine visibile originale
-                # Dobbiamo convertirli in coordinate della scena
+                # Offsets are provided in original visible image pixels
+                # Must convert to scene coordinates
                 visible_rect = self._visible_item.boundingRect()
                 
-                # Calcola il rapporto tra le dimensioni dell'item nella scena e l'immagine originale
+                # Calculate ratio between scene item size and original image
                 scale_x = visible_rect.width() / visible_width
                 scale_y = visible_rect.height() / visible_height
                 
-                # Converti gli offset da pixel dell'immagine visibile a coordinate scena
+                # Convert offsets from visible image pixels to scene coordinates
                 offset_x_scene = self._overlay_offset.x() * scale_x
                 offset_y_scene = self._overlay_offset.y() * scale_y
                 
-                # Posiziona l'immagine termica centrata più l'offset
+                # Position thermal image centered plus offset
                 pos_x = -scaled_thermal_rect.width()/2 + offset_x_scene
                 pos_y = -scaled_thermal_rect.height()/2 + offset_y_scene
                 
                 self._thermal_item.setPos(pos_x, pos_y)
             else:
-                # Se non c'è immagine visibile, centra la termica
+                # If no visible image, center thermal
                 transform = QTransform()
                 transform.scale(self._overlay_scale, self._overlay_scale)
                 self._thermal_item.setTransform(transform)
@@ -266,27 +311,35 @@ class ImageGraphicsView(QGraphicsView):
                 scaled_thermal_rect = transform.mapRect(thermal_rect)
                 self._thermal_item.setPos(-scaled_thermal_rect.width()/2, -scaled_thermal_rect.height()/2)
                 
-                # Se non c'è visibile, fit sulla termica scalata
+                # If no visible, fit on scaled thermal
                 self.resetTransform()
                 self.fitInView(self._thermal_item, Qt.KeepAspectRatio)
                 self._zoom_factor = self.transform().m11()
     
     def zoom_in(self, factor: float = 1.2):
-        """Zoom in con fattore specificato."""
+        """Zoom in with specified factor.
+        
+        Args:
+            factor (float): Zoom multiplication factor.
+        """
         new_zoom = self._zoom_factor * factor
         if new_zoom <= self._max_zoom:
             self.scale(factor, factor)
             self._zoom_factor = new_zoom
     
     def zoom_out(self, factor: float = 1.2):
-        """Zoom out con fattore specificato."""
+        """Zoom out with specified factor.
+        
+        Args:
+            factor (float): Zoom division factor.
+        """
         new_zoom = self._zoom_factor / factor
         if new_zoom >= self._min_zoom:
             self.scale(1/factor, 1/factor)
             self._zoom_factor = new_zoom
     
     def reset_zoom(self):
-        """Reset del zoom e pan."""
+        """Reset zoom and pan to default state."""
         self.resetTransform()
         self._zoom_factor = 1.0
         
@@ -296,40 +349,46 @@ class ImageGraphicsView(QGraphicsView):
             self._fit_thermal_in_view()
     
     def sync_transform(self, zoom_factor: float, pan_offset: QPointF, source_pixmap_size: tuple = None):
-        """Sincronizza questa vista con un'altra, mantenendo zoom relativo uguale."""
-        self._is_sync_source = False  # Evita loop
+        """Synchronize this view with another, maintaining equal relative zoom.
         
-        # Invece di applicare direttamente il zoom_factor dell'altra vista,
-        # calcoliamo il "livello di zoom relativo" dell'altra vista e lo applichiamo qui
+        Args:
+            zoom_factor (float): Source view's zoom factor.
+            pan_offset (QPointF): Source view's pan offset.
+            source_pixmap_size (tuple, optional): Source pixmap dimensions (width, height).
+        """
+        self._is_sync_source = False  # Prevent loops
+        
+        # Instead of directly applying other view's zoom_factor,
+        # calculate the "relative zoom level" of other view and apply it here
         
         if source_pixmap_size is not None and not self._thermal_item.pixmap().isNull():
             source_w, source_h = source_pixmap_size
             current_pixmap = self._thermal_item.pixmap()
             current_w, current_h = current_pixmap.width(), current_pixmap.height()
             
-            # Calcola il zoom "naturale" di base per ogni immagine
-            # Questo è il zoom che rende le immagini della stessa dimensione apparente
-            natural_zoom_source = 1.0  # La vista sorgente è il riferimento
+            # Calculate "natural" base zoom for each image
+            # This is the zoom that makes images appear same size
+            natural_zoom_source = 1.0  # Source view is reference
             natural_zoom_current = min(source_w / current_w, source_h / current_h) if current_w > 0 and current_h > 0 else 1.0
             
-            # Il zoom target per questa vista dovrebbe essere:
-            # il zoom naturale moltiplicato per il livello di zoom relativo della sorgente
-            source_relative_zoom = zoom_factor / natural_zoom_source  # Livello di zoom relativo della sorgente
+            # Target zoom for this view should be:
+            # natural zoom multiplied by source's relative zoom level
+            source_relative_zoom = zoom_factor / natural_zoom_source  # Source's relative zoom level
             target_zoom = natural_zoom_current * source_relative_zoom
             
-            # Applica il zoom target
+            # Apply target zoom
             scale_factor = target_zoom / self._zoom_factor
-            if abs(scale_factor - 1.0) > 0.001:  # Evita micro-aggiustamenti
+            if abs(scale_factor - 1.0) > 0.001:  # Avoid micro-adjustments
                 self.scale(scale_factor, scale_factor)
                 self._zoom_factor = target_zoom
         else:
-            # Fallback: applica direttamente il zoom factor (comportamento originale)
+            # Fallback: apply zoom factor directly (original behavior)
             scale_factor = zoom_factor / self._zoom_factor
             if abs(scale_factor - 1.0) > 0.001:
                 self.scale(scale_factor, scale_factor)
                 self._zoom_factor = zoom_factor
             
-        # Applica pan
+        # Apply pan
         current_transform = self.transform()
         new_transform = QTransform(current_transform)
         new_transform.setMatrix(
@@ -342,16 +401,24 @@ class ImageGraphicsView(QGraphicsView):
         self._is_sync_source = True
 
     def get_current_pixmap_size(self) -> tuple:
-        """Ritorna le dimensioni del pixmap corrente."""
+        """Get current pixmap dimensions.
+        
+        Returns:
+            tuple: Pixmap dimensions (width, height).
+        """
         if not self._thermal_item.pixmap().isNull():
             pixmap = self._thermal_item.pixmap()
             return (pixmap.width(), pixmap.height())
-        return (1, 1)  # Fallback per evitare divisioni per zero
+        return (1, 1)  # Fallback to avoid division by zero
 
     def wheelEvent(self, event: QWheelEvent):
-        """Gestione zoom con rotella del mouse."""
+        """Handle mouse wheel events for zooming and panning.
+        
+        Args:
+            event (QWheelEvent): The wheel event.
+        """
         if event.modifiers() == Qt.ControlModifier:
-            # Zoom con Ctrl + rotella
+            # Zoom with Ctrl + wheel
             angle_delta = event.angleDelta().y()
             factor = 1.2 if angle_delta > 0 else 1/1.2
             
@@ -360,30 +427,38 @@ class ImageGraphicsView(QGraphicsView):
             else:
                 self.zoom_out(factor)
             
-            # Emetti segnale di trasformazione con informazioni sulla dimensione
+            # Emit transformation signal with size information
             if self._is_sync_source:
                 pixmap_size = self.get_current_pixmap_size()
                 self.view_transformed.emit(self._zoom_factor, self.get_pan_offset(), pixmap_size)
             
             event.accept()
         else:
-            # Pan con rotella semplice
+            # Pan with simple wheel
             super().wheelEvent(event)
             if self._is_sync_source:
                 pixmap_size = self.get_current_pixmap_size()
                 self.view_transformed.emit(self._zoom_factor, self.get_pan_offset(), pixmap_size)
 
     def set_main_window(self, main_window):
-        """Imposta il riferimento alla finestra principale."""
+        """Set reference to main window for ROI operations.
+        
+        Args:
+            main_window: Reference to the main application window.
+        """
         self._main_window = main_window
 
     def mousePressEvent(self, event: QMouseEvent):
-        """Gestione click del mouse."""
+        """Handle mouse press events for ROI drawing and navigation.
+        
+        Args:
+            event (QMouseEvent): The mouse press event.
+        """
         # Check if we're in ROI drawing mode
         if (self._main_window and 
             hasattr(self._main_window, 'current_drawing_tool') and 
             self._main_window.current_drawing_tool == "rect" and 
-            self._allow_roi_drawing and                 # <— solo se abilitato
+            self._allow_roi_drawing and                 # Only if enabled
             event.button() == Qt.LeftButton):
             
             # Start ROI drawing
@@ -424,7 +499,11 @@ class ImageGraphicsView(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        """Gestione movimento del mouse per tooltip temperatura, sincronizzazione pan e ROI drawing."""
+        """Handle mouse movement for temperature tooltips, pan sync, and ROI drawing.
+        
+        Args:
+            event (QMouseEvent): The mouse move event.
+        """
         
         # Handle ROI drawing
         if self._roi_drawing:
@@ -433,24 +512,28 @@ class ImageGraphicsView(QGraphicsView):
         # Continue with existing functionality
         super().mouseMoveEvent(event)
         
-        # Emetti segnale se è cambiato il pan
+        # Emit signal if pan has changed
         if self._pan_active and self._is_sync_source:
             pixmap_size = self.get_current_pixmap_size()
             self.view_transformed.emit(self._zoom_factor, self.get_pan_offset(), pixmap_size)
         
-        # Calcola le coordinate sulla mappa termica
+        # Calculate coordinates on thermal map
         if not self._thermal_item.pixmap().isNull():
             scene_pos = self.mapToScene(event.pos())
             thermal_pos = self._thermal_item.mapFromScene(scene_pos)
             
-            # Converti in coordinate dell'immagine originale
+            # Convert to original image coordinates
             thermal_rect = self._thermal_item.boundingRect()
             if thermal_rect.contains(thermal_pos):
-                # Emetti il segnale con le coordinate relative all'immagine
+                # Emit signal with coordinates relative to image
                 self.mouse_moved_on_thermal.emit(thermal_pos)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        """Gestione rilascio del mouse."""
+        """Handle mouse release events.
+        
+        Args:
+            event (QMouseEvent): The mouse release event.
+        """
         
         # Handle ROI drawing completion
         if (self._roi_drawing and event.button() == Qt.LeftButton):
@@ -465,7 +548,11 @@ class ImageGraphicsView(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def _start_roi_drawing(self, event: QMouseEvent):
-        """Inizia il disegno di un ROI."""
+        """Start drawing a rectangular ROI.
+        
+        Args:
+            event (QMouseEvent): The mouse press event that started the drawing.
+        """
         scene_pos = self.mapToScene(event.pos())
         self._roi_start_pos = scene_pos
         self._roi_drawing = True
@@ -477,11 +564,15 @@ class ImageGraphicsView(QGraphicsView):
             QPen(QColor(255, 165, 0), 2),  # Orange pen
             QBrush(QColor(255, 165, 0, 40))  # Semi-transparent orange
         )
-        self._temp_roi_item.setZValue(10)  # rettangolo temporaneo sopra
+        self._temp_roi_item.setZValue(10)  # Temporary rectangle on top
         print(f"Started ROI drawing at: {scene_pos}")
 
     def _update_roi_drawing(self, event: QMouseEvent):
-        """Aggiorna il disegno del ROI durante il movimento del mouse."""
+        """Update ROI drawing during mouse movement.
+        
+        Args:
+            event (QMouseEvent): The mouse move event.
+        """
         if not self._roi_drawing or self._temp_roi_item is None:
             return
             
@@ -498,7 +589,11 @@ class ImageGraphicsView(QGraphicsView):
         self._temp_roi_item.setRect(new_rect)
 
     def _finish_roi_drawing(self, event: QMouseEvent):
-        """Completa il disegno del ROI."""
+        """Complete ROI drawing.
+        
+        Args:
+            event (QMouseEvent): The mouse release event that finished the drawing.
+        """
         if not self._roi_drawing or self._temp_roi_item is None:
             return
             
@@ -524,7 +619,11 @@ class ImageGraphicsView(QGraphicsView):
         print(f"Finished ROI drawing with rect: {final_rect}")
 
     def _create_roi_from_rect(self, rect: QRectF):
-        """Crea un ROI dal rettangolo disegnato."""
+        """Create a ROI from drawn rectangle.
+        
+        Args:
+            rect (QRectF): The rectangle in scene coordinates.
+        """
         if not self._main_window:
             return
             
@@ -532,7 +631,7 @@ class ImageGraphicsView(QGraphicsView):
         from analysis.roi_models import RectROI
         from ui.roi_items import RectROIItem
         
-        # 1) mappa i vertici del rettangolo da SCENA -> coordinate locali di _thermal_item (pixel termici)
+        # Map rectangle vertices from SCENE -> thermal item local coordinates (thermal pixels)
         tl_img = self._thermal_item.mapFromScene(rect.topLeft())
         br_img = self._thermal_item.mapFromScene(rect.bottomRight())
 
@@ -541,25 +640,25 @@ class ImageGraphicsView(QGraphicsView):
         w = abs(br_img.x() - tl_img.x())
         h = abs(br_img.y() - tl_img.y())
 
-        # 2) crea il modello con coordinate nell’immagine termica
+        # Create model with thermal image coordinates
         roi_model = RectROI(x=x, y=y, width=w, height=h, name=f"ROI_{len(self._main_window.rois)+1}")
         roi_model.emissivity = 0.95
 
-        # 3) crea l’item grafico come FIGLIO dell’item termico
+        # Create graphics item as CHILD of thermal item
         roi_item = RectROIItem(roi_model, parent=self._thermal_item)
         roi_item.setZValue(10)
 
-        # 4) NON aggiungere alla scena (è figlio dell’item già nella scena)
-        # self._scene.addItem(roi_item)  <-- rimuovi/evita
+        # DON'T add to scene (it's child of item already in scene)
+        # self._scene.addItem(roi_item)  <-- remove/avoid
 
-        # 5) registra nelle collezioni
+        # Register in collections
         self._main_window.rois.append(roi_model)
         self._main_window.roi_items[roi_model.id] = roi_item
 
-        # 6) aggiorna analisi/tabella
+        # Update analysis/table
         self._main_window.update_roi_analysis()
         
-        # Colore per-ROI (ciclo sulla ruota HSV)
+        # Per-ROI color (cycle through HSV wheel)
         hue = (len(self._main_window.rois) * 55) % 360
         color = QColor.fromHsv(hue, 220, 255)
         roi_model.color = color
@@ -568,7 +667,11 @@ class ImageGraphicsView(QGraphicsView):
         print(f"Created ROI: {roi_model}")
 
     def _create_spot_from_click(self, event: QMouseEvent):
-        """Crea uno spot ROI dal click del mouse."""
+        """Create a spot ROI from mouse click.
+        
+        Args:
+            event (QMouseEvent): The mouse click event.
+        """
         if not self._main_window:
             return
             
@@ -576,33 +679,33 @@ class ImageGraphicsView(QGraphicsView):
         from analysis.roi_models import SpotROI
         from ui.roi_items import SpotROIItem
         
-        # Converti la posizione del click in coordinate della scena
+        # Convert click position to scene coordinates
         scene_pos = self.mapToScene(event.pos())
         
-        # Mappa dalla scena alle coordinate dell'immagine termica
+        # Map from scene to thermal image coordinates
         thermal_pos = self._thermal_item.mapFromScene(scene_pos)
         
-        # Crea il modello spot ROI con raggio di default
+        # Create spot ROI model with default radius
         spot_model = SpotROI(
             x=thermal_pos.x(), 
             y=thermal_pos.y(), 
-            radius=10.0,  # Raggio di default in pixel termici
+            radius=10.0,  # Default radius in thermal pixels
             name=f"Spot_{len(self._main_window.rois)+1}"
         )
         spot_model.emissivity = 0.95
         
-        # Crea l'item grafico come figlio dell'item termico
+        # Create graphics item as child of thermal item
         spot_item = SpotROIItem(spot_model, parent=self._thermal_item)
         spot_item.setZValue(10)
         
-        # Registra nelle collezioni
+        # Register in collections
         self._main_window.rois.append(spot_model)
         self._main_window.roi_items[spot_model.id] = spot_item
         
-        # Aggiorna analisi/tabella
+        # Update analysis/table
         self._main_window.update_roi_analysis()
         
-        # Colore per-ROI (ciclo sulla ruota HSV)
+        # Per-ROI color (cycle through HSV wheel)
         hue = (len(self._main_window.rois) * 55) % 360
         color = QColor.fromHsv(hue, 220, 255)
         spot_model.color = color
@@ -611,35 +714,39 @@ class ImageGraphicsView(QGraphicsView):
         print(f"Created Spot ROI: {spot_model}")
 
     def _add_polygon_point(self, event: QMouseEvent):
-        """Aggiungi un punto al poligono in costruzione."""
-        # Converti la posizione del click in coordinate della scena
+        """Add a point to the polygon being constructed.
+        
+        Args:
+            event (QMouseEvent): The mouse click event.
+        """
+        # Convert click position to scene coordinates
         scene_pos = self.mapToScene(event.pos())
         
-        # Mappa dalla scena alle coordinate dell'immagine termica
+        # Map from scene to thermal image coordinates
         thermal_pos = self._thermal_item.mapFromScene(scene_pos)
         
-        # Aggiungi il punto alla lista
+        # Add point to list
         self._current_polygon_points.append((thermal_pos.x(), thermal_pos.y()))
         
-        # Se è il primo punto, inizia il disegno
+        # If first point, start drawing
         if not self._polygon_drawing:
             self._polygon_drawing = True
             self._temp_polygon_item = QGraphicsPolygonItem()
             self._temp_polygon_item.setPen(QPen(QColor(255, 165, 0, 150), 2, Qt.DashLine))
             self._temp_polygon_item.setBrush(QBrush(QColor(255, 165, 0, 30)))
-            # Imposta il parent item invece di setParent()
+            # Set parent item instead of setParent()
             self._temp_polygon_item.setParentItem(self._thermal_item)
             
-            # Mostra istruzioni all'utente
-            print("🔵 Poligono iniziato! Click sinistro per aggiungere punti, INVIO/DOPPIO-CLICK per completare, ESC per annullare")
+            # Show instructions to user
+            print("🔵 Polygon started! Left click to add points, ENTER/DOUBLE-CLICK to complete, ESC to cancel")
         
-        # Aggiorna il poligono temporaneo
+        # Update temporary polygon
         self._update_temp_polygon()
         
         print(f"Added polygon point: {thermal_pos.x():.1f}, {thermal_pos.y():.1f} (total: {len(self._current_polygon_points)})")
 
     def _update_temp_polygon(self):
-        """Aggiorna il poligono temporaneo durante il disegno."""
+        """Update temporary polygon during drawing."""
         if self._temp_polygon_item and len(self._current_polygon_points) >= 2:
             
             qt_polygon = QPolygonF()
@@ -649,38 +756,42 @@ class ImageGraphicsView(QGraphicsView):
             self._temp_polygon_item.setPolygon(qt_polygon)
 
     def _finish_polygon_drawing(self):
-        """Completa il disegno del poligono."""
+        """Complete polygon drawing."""
         if len(self._current_polygon_points) < 3:
-            print("⚠️  Poligono deve avere almeno 3 punti")
+            print("⚠️  Polygon must have at least 3 points")
             return
         
-        print("✅ Poligono completato!")
+        print("✅ Polygon completed!")
         
-        # Crea il poligono ROI definitivo
+        # Create final polygon ROI
         self._create_polygon_from_points(self._current_polygon_points)
         
-        # Reset stato e pulisci il poligono temporaneo
+        # Reset state and clean temporary polygon
         self._cancel_polygon_drawing()
         
-        # Disattiva la modalità di disegno poligoni
+        # Deactivate polygon drawing mode
         if self._main_window and hasattr(self._main_window, 'deactivate_drawing_tools'):
             self._main_window.deactivate_drawing_tools()
 
     def _cancel_polygon_drawing(self):
-        """Annulla il disegno del poligono e pulisce lo stato."""
-        # Rimuovi il poligono temporaneo
+        """Cancel polygon drawing and clean state."""
+        # Remove temporary polygon
         if self._temp_polygon_item:
-            # Se ha un parent, il parent lo rimuoverà automaticamente dalla scena
+            # If it has parent, parent will automatically remove from scene
             if self._temp_polygon_item.parentItem():
                 self._temp_polygon_item.setParentItem(None)
             self._temp_polygon_item = None
         
-        # Reset stato
+        # Reset state
         self._polygon_drawing = False
         self._current_polygon_points = []
 
     def _create_polygon_from_points(self, points):
-        """Crea un poligono ROI dai punti disegnati."""
+        """Create a polygon ROI from drawn points.
+        
+        Args:
+            points (list): List of (x, y) coordinate tuples in thermal image space.
+        """
         if not self._main_window:
             return
             
@@ -688,29 +799,29 @@ class ImageGraphicsView(QGraphicsView):
         from analysis.roi_models import PolygonROI
         from ui.roi_items import PolygonROIItem
         
-        # Chiudi il poligono se necessario
+        # Close polygon if necessary
         if points[0] != points[-1]:
             points.append(points[0])
         
-        # Crea il modello poligono ROI
+        # Create polygon ROI model
         polygon_model = PolygonROI(
             points=points,
             name=f"Polygon_{len(self._main_window.rois)+1}"
         )
         polygon_model.emissivity = 0.95
         
-        # Crea l'item grafico come figlio dell'item termico
+        # Create graphics item as child of thermal item
         polygon_item = PolygonROIItem(polygon_model, parent=self._thermal_item)
         polygon_item.setZValue(10)
         
-        # Registra nelle collezioni
+        # Register in collections
         self._main_window.rois.append(polygon_model)
         self._main_window.roi_items[polygon_model.id] = polygon_item
         
-        # Aggiorna analisi/tabella
+        # Update analysis/table
         self._main_window.update_roi_analysis()
         
-        # Colore per-ROI (ciclo sulla ruota HSV)
+        # Per-ROI color (cycle through HSV wheel)
         hue = (len(self._main_window.rois) * 55) % 360
         color = QColor.fromHsv(hue, 220, 255)
         polygon_model.color = color
@@ -719,11 +830,19 @@ class ImageGraphicsView(QGraphicsView):
         print(f"Created Polygon ROI: {polygon_model}")
 
     def get_zoom_factor(self) -> float:
-        """Ritorna il fattore di zoom corrente."""
+        """Get current zoom factor.
+        
+        Returns:
+            float: Current zoom factor.
+        """
         return self._zoom_factor
     
     def get_overlay_settings(self) -> dict:
-        """Ritorna le impostazioni correnti dell'overlay."""
+        """Get current overlay settings.
+        
+        Returns:
+            dict: Dictionary containing overlay configuration.
+        """
         return {
             'mode': self._overlay_mode,
             'alpha': self._overlay_alpha,
@@ -733,7 +852,11 @@ class ImageGraphicsView(QGraphicsView):
         }
 
     def get_scale_info(self) -> dict:
-        """Ritorna informazioni dettagliate sulle scale per debug."""
+        """Get detailed scale information for debugging.
+        
+        Returns:
+            dict: Dictionary containing scale and transform details.
+        """
         info = {
             'overlay_scale': self._overlay_scale,
             'view_transform': self.transform().m11(),
@@ -759,7 +882,7 @@ class ImageGraphicsView(QGraphicsView):
             info['natural_scale'] = natural_scale
             info['final_scale'] = self._overlay_scale * natural_scale
             
-            # Calcola gli offset convertiti
+            # Calculate converted offsets
             scale_x = visible_rect.width() / visible_pixmap.width()
             scale_y = visible_rect.height() / visible_pixmap.height()
             offset_x_scene = self._overlay_offset.x() * scale_x
@@ -774,13 +897,21 @@ class ImageGraphicsView(QGraphicsView):
         return info
 
     def get_pan_offset(self) -> QPointF:
-        """Ritorna l'offset corrente del pan."""
+        """Get current pan offset.
+        
+        Returns:
+            QPointF: Current pan offset.
+        """
         transform = self.transform()
         return QPointF(transform.dx(), transform.dy())
 
     def keyPressEvent(self, event):
-        """Gestione pressione tasti."""
-        # INVIO completa il poligono
+        """Handle key press events.
+        
+        Args:
+            event: The key press event.
+        """
+        # ENTER completes polygon
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             if (self._main_window and 
                 hasattr(self._main_window, 'current_drawing_tool') and 
@@ -791,15 +922,15 @@ class ImageGraphicsView(QGraphicsView):
                 event.accept()
                 return
         
-        # ESC ferma la modalità di disegno ROI
+        # ESC stops ROI drawing mode
         if event.key() == Qt.Key_Escape:
             if (self._main_window and 
                 hasattr(self._main_window, 'current_drawing_tool') and 
                 self._main_window.current_drawing_tool is not None):
                 
-                # Se stavamo disegnando un poligono, pulisci
+                # If we were drawing a polygon, clean up
                 if self._polygon_drawing:
-                    print("❌ Disegno poligono annullato")
+                    print("❌ Polygon drawing cancelled")
                     self._cancel_polygon_drawing()
                 
                 self._main_window.deactivate_drawing_tools()

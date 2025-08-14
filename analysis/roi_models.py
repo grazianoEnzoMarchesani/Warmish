@@ -99,11 +99,21 @@ class RectROI:
 
 class SpotROI:
     """
-    Punto/cerchio ROI con centro (x,y) e raggio in pixel termici.
+    Point/circle ROI with center (x,y) and radius in thermal pixels.
+    
+    Represents a circular area with position, radius, and metadata for
+    thermal analysis of spot measurements.
     """
     def __init__(self, x: float, y: float, radius: float = 5.0, name: str = ""):
-        import uuid
-        from typing import Optional
+        """
+        Initialize a spot (circular) ROI.
+        
+        Args:
+            x: X coordinate of the center
+            y: Y coordinate of the center
+            radius: Radius of the circle in thermal pixels
+            name: Optional name for the ROI
+        """
         self.id = uuid.uuid4()
         self.x = x
         self.y = y
@@ -207,7 +217,7 @@ class PolygonROI:
             name: Optional name for the ROI
         """
         self.id = uuid.uuid4()
-        self.points = points if points else []  # Lista di tuple (x, y)
+        self.points = points if points else []  # List of (x, y) tuples
         self.name = name if name else f"Polygon_{str(self.id)[:8]}"
         
         # Statistics will be calculated when analyzing temperature data
