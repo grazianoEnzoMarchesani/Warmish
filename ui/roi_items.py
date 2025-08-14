@@ -60,11 +60,24 @@ class RectROIItem(QGraphicsRectItem):
         self._color = getattr(self.model, "color", QColor(255, 165, 0))
         self._apply_color(self._color)
         
+        # Label background: black rectangle with 25% opacity
+        self.label_background = QGraphicsRectItem(self)
+        background_color = QColor(0, 0, 0, 64)  # Black with 25% opacity (64/255 ≈ 25%)
+        self.label_background.setBrush(QBrush(background_color))
+        self.label_background.setPen(QPen(Qt.NoPen))  # No border
+        self.label_background.setZValue(self.zValue() + 0.5)  # Between ROI and label
+        
         # Label: name + statistics; does not scale with zoom
         self.label = QGraphicsTextItem("", self)
         self.label.setDefaultTextColor(Qt.white)
         self.label.setZValue(self.zValue() + 1)
         self.label.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        
+        # Set font size to match export font size for consistency
+        font = self.label.font()
+        font.setPointSize(14)  # Match the export font size
+        self.label.setFont(font)
+        
         self.refresh_label()
         self._update_label_pos()
     
@@ -516,8 +529,35 @@ class RectROIItem(QGraphicsRectItem):
         self._update_label_pos()
     
     def _update_label_pos(self):
-        """Update label position to top-left corner of rectangle with small offset."""
-        self.label.setPos(self.rect().left() + 2, self.rect().top() - self.label.boundingRect().height() - 2)
+        """Update the label position and background size relative to the rectangle."""
+        # Position label above the rectangle with small offset
+        label_x = self.rect().left() + 2
+        label_y = self.rect().top() - self.label.boundingRect().height() - 2
+        self.label.setPos(label_x, label_y)
+        
+        # Calculate precise text dimensions using font metrics
+        font = self.label.font()
+        from PySide6.QtGui import QFontMetrics
+        metrics = QFontMetrics(font)
+        text = self.label.toPlainText()
+        lines = text.split('\n')
+        
+        # Get the actual text width (max of all lines) and height
+        text_width = max(metrics.horizontalAdvance(line) for line in lines) if lines else 0
+        text_height = metrics.height() * len(lines)
+        
+        # Use minimal asymmetric padding for tight fit
+        padding_left = 0.5    # Reduced from 1 to 0.5
+        padding_right = 0     # Reduced from 0.5 to 0 (no padding on right)
+        padding_vertical = 0.5  # Reduced from 1 to 0.5
+        
+        background_rect = QRectF(
+            label_x - padding_left,
+            label_y - padding_vertical, 
+            text_width + padding_left + padding_right,
+            text_height + 2 * padding_vertical
+        )
+        self.label_background.setRect(background_rect)
 
 
 class SpotROIItem(QGraphicsEllipseItem):
@@ -567,11 +607,24 @@ class SpotROIItem(QGraphicsEllipseItem):
         self._color = getattr(self.model, "color", QColor(255, 165, 0))
         self._apply_color(self._color)
         
+        # Label background: black rectangle with 25% opacity
+        self.label_background = QGraphicsRectItem(self)
+        background_color = QColor(0, 0, 0, 64)  # Black with 25% opacity (64/255 ≈ 25%)
+        self.label_background.setBrush(QBrush(background_color))
+        self.label_background.setPen(QPen(Qt.NoPen))  # No border
+        self.label_background.setZValue(self.zValue() + 0.5)  # Between ROI and label
+        
         # Label: name + statistics; does not scale with zoom
         self.label = QGraphicsTextItem("", self)
         self.label.setDefaultTextColor(Qt.white)
         self.label.setZValue(self.zValue() + 1)
         self.label.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        
+        # Set font size to match export font size for consistency
+        font = self.label.font()
+        font.setPointSize(14)  # Match the export font size
+        self.label.setFont(font)
+        
         self.refresh_label()
         self._update_label_pos()
     
@@ -928,12 +981,36 @@ class SpotROIItem(QGraphicsEllipseItem):
         self._update_label_pos()
     
     def _update_label_pos(self):
-        """Update the label position relative to the circle."""
+        """Update the label position and background size relative to the circle."""
         # Position label above the circle with small offset, similar to RectROI approach
         rect = self.rect()
         label_x = rect.left() + 2  # Small offset from left edge
         label_y = rect.top() - self.label.boundingRect().height() - 2
         self.label.setPos(label_x, label_y)
+        
+        # Calculate precise text dimensions using font metrics
+        font = self.label.font()
+        from PySide6.QtGui import QFontMetrics
+        metrics = QFontMetrics(font)
+        text = self.label.toPlainText()
+        lines = text.split('\n')
+        
+        # Get the actual text width (max of all lines) and height
+        text_width = max(metrics.horizontalAdvance(line) for line in lines) if lines else 0
+        text_height = metrics.height() * len(lines)
+        
+        # Use minimal asymmetric padding for tight fit
+        padding_left = 0.5    # Reduced from 1 to 0.5
+        padding_right = 0     # Reduced from 0.5 to 0 (no padding on right)
+        padding_vertical = 0.5  # Reduced from 1 to 0.5
+        
+        background_rect = QRectF(
+            label_x - padding_left,
+            label_y - padding_vertical, 
+            text_width + padding_left + padding_right,
+            text_height + 2 * padding_vertical
+        )
+        self.label_background.setRect(background_rect)
 
 
 class PolygonROIItem(QGraphicsPolygonItem):
@@ -995,11 +1072,24 @@ class PolygonROIItem(QGraphicsPolygonItem):
         self._color = getattr(self.model, "color", QColor(255, 165, 0))
         self._apply_color(self._color)
         
+        # Label background: black rectangle with 25% opacity
+        self.label_background = QGraphicsRectItem(self)
+        background_color = QColor(0, 0, 0, 64)  # Black with 25% opacity (64/255 ≈ 25%)
+        self.label_background.setBrush(QBrush(background_color))
+        self.label_background.setPen(QPen(Qt.NoPen))  # No border
+        self.label_background.setZValue(self.zValue() + 0.5)  # Between ROI and label
+        
         # Label: name + statistics; does not scale with zoom
         self.label = QGraphicsTextItem("", self)
         self.label.setDefaultTextColor(Qt.white)
         self.label.setZValue(self.zValue() + 1)
         self.label.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        
+        # Set font size to match export font size for consistency
+        font = self.label.font()
+        font.setPointSize(14)  # Match the export font size
+        self.label.setFont(font)
+        
         self.refresh_label()
         self._update_label_pos()
     
@@ -1327,9 +1417,33 @@ class PolygonROIItem(QGraphicsPolygonItem):
         self._update_label_pos()
     
     def _update_label_pos(self):
-        """Update the label position relative to the polygon."""
+        """Update the label position and background size relative to the polygon."""
         # Position label above the polygon's bounding box, similar to RectROI approach
         bbox = self.polygon().boundingRect()
         label_x = bbox.left() + 2  # Small offset from left edge
         label_y = bbox.top() - self.label.boundingRect().height() - 2
         self.label.setPos(label_x, label_y)
+        
+        # Calculate precise text dimensions using font metrics
+        font = self.label.font()
+        from PySide6.QtGui import QFontMetrics
+        metrics = QFontMetrics(font)
+        text = self.label.toPlainText()
+        lines = text.split('\n')
+        
+        # Get the actual text width (max of all lines) and height
+        text_width = max(metrics.horizontalAdvance(line) for line in lines) if lines else 0
+        text_height = metrics.height() * len(lines)
+        
+        # Use minimal asymmetric padding for tight fit
+        padding_left = 0.5    # Reduced from 1 to 0.5
+        padding_right = 0     # Reduced from 0.5 to 0 (no padding on right)
+        padding_vertical = 0.5  # Reduced from 1 to 0.5
+        
+        background_rect = QRectF(
+            label_x - padding_left,
+            label_y - padding_vertical, 
+            text_width + padding_left + padding_right,
+            text_height + 2 * padding_vertical
+        )
+        self.label_background.setRect(background_rect)

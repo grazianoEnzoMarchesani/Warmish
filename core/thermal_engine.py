@@ -762,10 +762,10 @@ class ThermalEngine(QObject):
 
             label_text = f"{line1}\n{line2}"
             
-            # Use standard font (not bold, smaller size for consistency)
+            # Use larger font for better visibility in export
             font = painter.font()
-            font.setPointSize(10)  # Smaller size, more similar to scene
-            font.setBold(False)   # Not bold like in scene
+            font.setPointSize(14)  # Increased from 10 to 14 for better visibility
+            font.setBold(False)   
             painter.setFont(font)
             
             # Calculate text dimensions
@@ -775,17 +775,25 @@ class ThermalEngine(QObject):
             line_height = metrics.height()
             total_height = line_height * len(lines)
             
-            # Draw text with white color and black outline for visibility (like scene labels)
-            # First draw black outline
-            painter.setPen(QPen(Qt.black, 3))  # Thick black outline for visibility
-            for i, line in enumerate(lines):
-                text_y = label_y + (i + 1) * line_height - 3
-                for dx in [-1, 0, 1]:
-                    for dy in [-1, 0, 1]:
-                        if dx != 0 or dy != 0:  # Don't draw at center position yet
-                            painter.drawText(QPointF(label_x + dx, text_y + dy), line)
+            # Draw background rectangle with 25% opacity black and minimal padding
+            padding_left = 0.5    # Reduced for tighter fit
+            padding_right = 0     # No padding on right
+            padding_vertical = 0.5  # Reduced for tighter fit
             
-            # Then draw white text on top
+            background_rect = QRectF(
+                label_x - padding_left,
+                label_y - padding_vertical,
+                max_width + padding_left + padding_right,
+                total_height + 2 * padding_vertical
+            )
+            
+            # Set brush for background rectangle (black with 25% opacity)
+            background_color = QColor(0, 0, 0, 64)  # Black with 25% opacity (64/255 ≈ 25%)
+            painter.setBrush(QBrush(background_color))
+            painter.setPen(QPen(Qt.NoPen))  # No border for background
+            painter.drawRect(background_rect)
+            
+            # Draw text with white color for maximum contrast
             painter.setPen(QPen(Qt.white))
             for i, line in enumerate(lines):
                 text_y = label_y + (i + 1) * line_height - 3

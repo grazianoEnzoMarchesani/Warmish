@@ -2186,8 +2186,8 @@ class ThermalAnalyzerNG(QMainWindow):
         base_path = os.path.splitext(file_path)[0]
         
         try:
-            # Progress tracking - now 6 steps instead of 4
-            total_steps = 6
+            # Progress tracking - now 5 steps instead of 6 (removed current_view export)
+            total_steps = 5
             current_step = 0
             
             # Create progress message box
@@ -2240,17 +2240,7 @@ class ThermalAnalyzerNG(QMainWindow):
                 exported_files.append(overlay_path)
                 print(f"✅ Exported overlay image: {overlay_path}")
             
-            # 5. Export scene composition (current view as-is)
-            current_step += 1
-            progress_msg.setText(f"Exporting current view... ({current_step}/{total_steps})")
-            QApplication.processEvents()
-            
-            scene_path = f"{base_path}_current_view.png"
-            if self._export_current_scene(scene_path):
-                exported_files.append(scene_path)
-                print(f"✅ Exported current scene: {scene_path}")
-            
-            # 6. Export data CSV
+            # 5. Export data CSV (removed current_view export step)
             current_step += 1
             progress_msg.setText(f"Exporting analysis data... ({current_step}/{total_steps})")
             QApplication.processEvents()

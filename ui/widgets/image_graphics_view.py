@@ -1044,34 +1044,68 @@ class ImageGraphicsView(QGraphicsView):
                 
                 print(f"🖼️ Export dimensions: {export_width}x{export_height} (scale: {scale_factor})")
                 
-                # Create pixmap for rendering
-                export_pixmap = QPixmap(export_width, export_height)
-                export_pixmap.fill(Qt.black)
+                # Find all ROI labels in the scene and temporarily increase font size for export
+                roi_labels = []
+                original_fonts = []
                 
-                # Create painter for rendering
-                painter = QPainter(export_pixmap)
-                painter.setRenderHint(QPainter.Antialiasing)
-                painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                print("🔍 Finding ROI labels for export font scaling...")
+                for item in self._scene.items():
+                    # Look for QGraphicsTextItem that are ROI labels (have specific parent types)
+                    if hasattr(item, 'parentItem') and item.parentItem():
+                        parent = item.parentItem()
+                        parent_type = type(parent).__name__
+                        if parent_type in ['RectROIItem', 'SpotROIItem', 'PolygonROIItem']:
+                            # Check if this is the label (QGraphicsTextItem)
+                            from PySide6.QtWidgets import QGraphicsTextItem
+                            if isinstance(item, QGraphicsTextItem):
+                                roi_labels.append(item)
+                                original_fonts.append(item.font())
+                                print(f"  📄 Found ROI label: {item.toPlainText()[:20]}...")
                 
-                # Scale the painter for high-resolution export
-                painter.scale(scale_factor, scale_factor)
+                print(f"  Total ROI labels found: {len(roi_labels)}")
                 
-                # Render the scene to the painter
-                self._scene.render(painter, QRectF(0, 0, scene_rect.width(), scene_rect.height()), scene_rect)
+                # Temporarily increase font size for high-resolution export (doubled for better readability)
+                export_font_size = int(28 * scale_factor)  # Doubled from 14 to 28 for better visibility in overlay export
+                print(f"  📝 Setting temporary font size to {export_font_size}pt for export")
                 
-                painter.end()
+                for label in roi_labels:
+                    new_font = label.font()
+                    new_font.setPointSize(export_font_size)
+                    label.setFont(new_font)
+                    # DON'T call _update_label_pos() to avoid resizing the background rectangle
                 
-                # Save the exported image
-                success = export_pixmap.save(file_path, "PNG")
+                print("  ✅ Temporarily increased font size for ROI labels (backgrounds unchanged)")
                 
-                if success:
-                    print(f"✅ Overlay image exported successfully: {file_path}")
-                    print(f"  - Resolution: {export_width}x{export_height}")
-                    print(f"  - Scale factor: {scale_factor:.1f}x")
-                    if force_overlay and not original_overlay_mode:
-                        print("  - Overlay mode was forced for export")
-                else:
-                    print(f"❌ Failed to save overlay image: {file_path}")
+                try:
+                    # Create pixmap for rendering
+                    export_pixmap = QPixmap(export_width, export_height)
+                    export_pixmap.fill(Qt.black)
+                    
+                    # Create painter for rendering
+                    painter = QPainter(export_pixmap)
+                    painter.setRenderHint(QPainter.Antialiasing)
+                    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                    
+                    # Scale the painter for high-resolution export
+                    painter.scale(scale_factor, scale_factor)
+                    
+                    # Render the scene to the painter
+                    self._scene.render(painter, QRectF(0, 0, scene_rect.width(), scene_rect.height()), scene_rect)
+                    
+                    painter.end()
+                    
+                    # Save the exported image
+                    success = export_pixmap.save(file_path, "PNG")
+                    
+                finally:
+                    # Restore original fonts for ROI labels
+                    for i, label in enumerate(roi_labels):
+                        label.setFont(original_fonts[i])
+                        # Now update label positions to restore correct background sizes
+                        if hasattr(label.parentItem(), '_update_label_pos'):
+                            label.parentItem()._update_label_pos()
+                    
+                    print("  🔄 Restored original fonts and label positions for ROI labels")
                     
                 return success
                 
