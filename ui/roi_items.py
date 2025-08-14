@@ -380,11 +380,13 @@ class RectROIItem(QGraphicsRectItem):
         self.model.y = int(self.pos().y())
         self.model.width = float(self.rect().width())
         self.model.height = float(self.rect().height())
+        
+        # Use the new signal-based approach
         view_list = self.scene().views()
         if view_list:
             view = view_list[0]
-            if hasattr(view, "_main_window") and hasattr(view._main_window, "update_single_roi"):
-                view._main_window.update_single_roi(self.model)
+            if hasattr(view, "notify_roi_modified"):
+                view.notify_roi_modified(self.model)
     
     def _apply_color(self, color: QColor):
         """
@@ -414,15 +416,16 @@ class RectROIItem(QGraphicsRectItem):
     def refresh_label(self):
         """Refresh the label text with current statistics."""
         m = self.model
-        # Retrieve settings from MainWindow
+        
+        # Get settings from ImageGraphicsView instead of MainWindow
         settings = {
             "name": True, "emissivity": True, "min": True, "max": True, "avg": True, "median": False
         }
         views = self.scene().views()
         if views:
-            mw = getattr(views[0], "_main_window", None)
-            if mw and hasattr(mw, "roi_label_settings"):
-                settings = mw.roi_label_settings
+            view = views[0]
+            if hasattr(view, "get_roi_label_settings"):
+                settings = view.get_roi_label_settings()
 
         def fmt(v): return f"{v:.2f}" if (v is not None) else "N/A"
         parts1 = []
@@ -790,12 +793,12 @@ class SpotROIItem(QGraphicsEllipseItem):
         self.model.x = float(self.pos().x())
         self.model.y = float(self.pos().y())
         
-        # Notify main window for recalculation
+        # Use the new signal-based approach
         view_list = self.scene().views()
         if view_list:
             view = view_list[0]
-            if hasattr(view, "_main_window") and hasattr(view._main_window, "update_single_roi"):
-                view._main_window.update_single_roi(self.model)
+            if hasattr(view, "notify_roi_modified"):
+                view.notify_roi_modified(self.model)
     
     def _apply_color(self, color: QColor):
         """
@@ -825,15 +828,16 @@ class SpotROIItem(QGraphicsEllipseItem):
     def refresh_label(self):
         """Refresh the label text with current statistics."""
         m = self.model
-        # Retrieve settings from MainWindow
+        
+        # Get settings from ImageGraphicsView instead of MainWindow
         settings = {
             "name": True, "emissivity": True, "min": True, "max": True, "avg": True, "median": False
         }
         views = self.scene().views()
         if views:
-            mw = getattr(views[0], "_main_window", None)
-            if mw and hasattr(mw, "roi_label_settings"):
-                settings = mw.roi_label_settings
+            view = views[0]
+            if hasattr(view, "get_roi_label_settings"):
+                settings = view.get_roi_label_settings()
 
         def fmt(v): return f"{v:.2f}" if (v is not None) else "N/A"
         parts1 = []
@@ -1014,6 +1018,13 @@ class PolygonROIItem(QGraphicsPolygonItem):
             for i, point in enumerate(self.model.points):
                 new_point = original_polygon[i] + offset
                 self.model.points[i] = (new_point.x(), new_point.y())
+            
+            # Notify about the change using the new signal-based approach
+            view_list = self.scene().views()
+            if view_list:
+                view = view_list[0]
+                if hasattr(view, "notify_roi_modified"):
+                    view.notify_roi_modified(self.model)
         
         return super().itemChange(change, value)
     
@@ -1169,8 +1180,8 @@ class PolygonROIItem(QGraphicsPolygonItem):
         view_list = self.scene().views()
         if view_list:
             view = view_list[0]
-            if hasattr(view, "_main_window") and hasattr(view._main_window, "update_single_roi"):
-                view._main_window.update_single_roi(self.model)
+            if hasattr(view, "notify_roi_modified"):
+                view.notify_roi_modified(self.model)
     
     def _apply_color(self, color: QColor):
         """
@@ -1200,15 +1211,16 @@ class PolygonROIItem(QGraphicsPolygonItem):
     def refresh_label(self):
         """Refresh the label text with current statistics."""
         m = self.model
-        # Retrieve settings from MainWindow
+        
+        # Get settings from ImageGraphicsView instead of MainWindow
         settings = {
             "name": True, "emissivity": True, "min": True, "max": True, "avg": True, "median": False
         }
         views = self.scene().views()
         if views:
-            mw = getattr(views[0], "_main_window", None)
-            if mw and hasattr(mw, "roi_label_settings"):
-                settings = mw.roi_label_settings
+            view = views[0]
+            if hasattr(view, "get_roi_label_settings"):
+                settings = view.get_roi_label_settings()
 
         def fmt(v): return f"{v:.2f}" if (v is not None) else "N/A"
         parts1 = []

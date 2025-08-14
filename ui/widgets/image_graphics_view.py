@@ -63,14 +63,26 @@ class ImageGraphicsView(QGraphicsView):
     Signals:
         mouse_moved_on_thermal (QPointF): Emitted when mouse moves over thermal image.
         view_transformed (float, QPointF, tuple): Emitted when view changes (zoom, pan).
-        roi_created (QRectF): Emitted when a ROI is completed.
+        rect_roi_drawn (QRectF): Emitted when a rectangular ROI is completed.
+        spot_roi_drawn (QPointF, float): Emitted when a spot ROI is created.
+        polygon_roi_drawn (list): Emitted when a polygon ROI is completed.
+        drawing_tool_deactivation_requested (): Emitted when drawing tools should be deactivated.
+        roi_modified (object): Emitted when an existing ROI is moved or resized.
     """
     
     # Signals for thermal image interaction
     mouse_moved_on_thermal = Signal(QPointF)
     view_transformed = Signal(float, QPointF, tuple)  # zoom_factor, pan_offset, pixmap_size
-    roi_created = Signal(QRectF)  # Emitted when a ROI is completed
     
+    # ROI creation signals - replace direct MainWindow coupling
+    rect_roi_drawn = Signal(QRectF)  # thermal image coordinates
+    spot_roi_drawn = Signal(QPointF, float)  # center point, radius in thermal pixels
+    polygon_roi_drawn = Signal(list)  # list of (x, y) points in thermal coordinates
+    drawing_tool_deactivation_requested = Signal()
+    
+    # ROI modification signal - emitted when existing ROI is changed
+    roi_modified = Signal(object)  # ROI model that was modified
+
     def __init__(self, parent: Optional[QWidget] = None):
         """Initialize the image graphics view.
         
@@ -118,8 +130,8 @@ class ImageGraphicsView(QGraphicsView):
         # Enable mouse tracking for temperature tooltips
         self.setMouseTracking(True)
         
-        # ROI drawing state
-        self._main_window = None
+        # ROI drawing state - decoupled from MainWindow
+        self._current_drawing_tool = None  # "rect", "spot", "polygon", or None
         self._roi_drawing = False
         self._roi_start_pos = None
         self._temp_roi_item = None
@@ -133,6 +145,16 @@ class ImageGraphicsView(QGraphicsView):
         # Enable keyboard input for polygon completion shortcuts
         self.setFocusPolicy(Qt.StrongFocus)
 
+        # ROI label settings - will be updated by MainWindow
+        self._roi_label_settings = {
+            "name": True,
+            "emissivity": True,
+            "min": True,
+            "max": True,
+            "avg": True,
+            "median": False,
+        }
+
     def set_allow_roi_drawing(self, allowed: bool):
         """Enable or disable ROI drawing capability.
         
@@ -140,6 +162,27 @@ class ImageGraphicsView(QGraphicsView):
             allowed (bool): Whether to allow ROI drawing.
         """
         self._allow_roi_drawing = allowed
+
+    def set_drawing_tool(self, tool: Optional[str]):
+        """Set the current drawing tool.
+        
+        Args:
+            tool (str, optional): The drawing tool to activate ("rect", "spot", "polygon") 
+                                or None to deactivate drawing.
+        """
+        self._current_drawing_tool = tool
+        
+        # Cancel any ongoing polygon drawing when switching tools
+        if tool != "polygon" and self._polygon_drawing:
+            self._cancel_polygon_drawing()
+
+    def get_drawing_tool(self) -> Optional[str]:
+        """Get the current drawing tool.
+        
+        Returns:
+            str or None: The current drawing tool or None if no tool is active.
+        """
+        return self._current_drawing_tool
 
     def set_thermal_pixmap(self, pixmap: QPixmap):
         """Set the thermal image pixmap.
@@ -440,14 +483,6 @@ class ImageGraphicsView(QGraphicsView):
                 pixmap_size = self.get_current_pixmap_size()
                 self.view_transformed.emit(self._zoom_factor, self.get_pan_offset(), pixmap_size)
 
-    def set_main_window(self, main_window):
-        """Set reference to main window for ROI operations.
-        
-        Args:
-            main_window: Reference to the main application window.
-        """
-        self._main_window = main_window
-
     def mousePressEvent(self, event: QMouseEvent):
         """Handle mouse press events for ROI drawing and navigation.
         
@@ -455,10 +490,8 @@ class ImageGraphicsView(QGraphicsView):
             event (QMouseEvent): The mouse press event.
         """
         # Check if we're in ROI drawing mode
-        if (self._main_window and 
-            hasattr(self._main_window, 'current_drawing_tool') and 
-            self._main_window.current_drawing_tool == "rect" and 
-            self._allow_roi_drawing and                 # Only if enabled
+        if (self._current_drawing_tool == "rect" and 
+            self._allow_roi_drawing and                 
             event.button() == Qt.LeftButton):
             
             # Start ROI drawing
@@ -466,9 +499,7 @@ class ImageGraphicsView(QGraphicsView):
             return  # Don't call super() to prevent other mouse handling
         
         # Check if we're in spot ROI mode
-        if (self._main_window and 
-            hasattr(self._main_window, 'current_drawing_tool') and 
-            self._main_window.current_drawing_tool == "spot" and 
+        if (self._current_drawing_tool == "spot" and 
             self._allow_roi_drawing and
             event.button() == Qt.LeftButton):
             
@@ -477,9 +508,7 @@ class ImageGraphicsView(QGraphicsView):
             return
         
         # Check if we're in polygon ROI mode
-        if (self._main_window and 
-            hasattr(self._main_window, 'current_drawing_tool') and 
-            self._main_window.current_drawing_tool == "polygon" and 
+        if (self._current_drawing_tool == "polygon" and 
             self._allow_roi_drawing):
             
             if event.button() == Qt.LeftButton:
@@ -610,27 +639,19 @@ class ImageGraphicsView(QGraphicsView):
         
         # Create ROI if rectangle is large enough
         if final_rect.width() > 5 and final_rect.height() > 5:
-            self._create_roi_from_rect(final_rect)
+            self._emit_rect_roi_signal(final_rect)
         
-        # Reset drawing tool in main window
-        if self._main_window:
-            self._main_window.deactivate_drawing_tools()
+        # Request drawing tool deactivation
+        self.drawing_tool_deactivation_requested.emit()
         
         print(f"Finished ROI drawing with rect: {final_rect}")
 
-    def _create_roi_from_rect(self, rect: QRectF):
-        """Create a ROI from drawn rectangle.
+    def _emit_rect_roi_signal(self, rect: QRectF):
+        """Emit signal for rectangular ROI creation.
         
         Args:
             rect (QRectF): The rectangle in scene coordinates.
         """
-        if not self._main_window:
-            return
-            
-        # Import here to avoid circular imports
-        from analysis.roi_models import RectROI
-        from ui.roi_items import RectROIItem
-        
         # Map rectangle vertices from SCENE -> thermal item local coordinates (thermal pixels)
         tl_img = self._thermal_item.mapFromScene(rect.topLeft())
         br_img = self._thermal_item.mapFromScene(rect.bottomRight())
@@ -640,78 +661,36 @@ class ImageGraphicsView(QGraphicsView):
         w = abs(br_img.x() - tl_img.x())
         h = abs(br_img.y() - tl_img.y())
 
-        # Create model with thermal image coordinates
-        roi_model = RectROI(x=x, y=y, width=w, height=h, name=f"ROI_{len(self._main_window.rois)+1}")
-        roi_model.emissivity = 0.95
-
-        # Create graphics item as CHILD of thermal item
-        roi_item = RectROIItem(roi_model, parent=self._thermal_item)
-        roi_item.setZValue(10)
-
-        # DON'T add to scene (it's child of item already in scene)
-        # self._scene.addItem(roi_item)  <-- remove/avoid
-
-        # Register in collections
-        self._main_window.rois.append(roi_model)
-        self._main_window.roi_items[roi_model.id] = roi_item
-
-        # Update analysis/table
-        self._main_window.update_roi_analysis()
+        # Create thermal image coordinate rectangle
+        thermal_rect = QRectF(x, y, w, h)
         
-        # Per-ROI color (cycle through HSV wheel)
-        hue = (len(self._main_window.rois) * 55) % 360
-        color = QColor.fromHsv(hue, 220, 255)
-        roi_model.color = color
-        roi_item.set_color(color)
+        # Emit signal with thermal image coordinates
+        self.rect_roi_drawn.emit(thermal_rect)
         
-        print(f"Created ROI: {roi_model}")
+        print(f"Emitted rect ROI signal: {thermal_rect}")
 
     def _create_spot_from_click(self, event: QMouseEvent):
-        """Create a spot ROI from mouse click.
+        """Emit signal for spot ROI creation.
         
         Args:
             event (QMouseEvent): The mouse click event.
         """
-        if not self._main_window:
-            return
-            
-        # Import here to avoid circular imports
-        from analysis.roi_models import SpotROI
-        from ui.roi_items import SpotROIItem
-        
         # Convert click position to scene coordinates
         scene_pos = self.mapToScene(event.pos())
         
         # Map from scene to thermal image coordinates
         thermal_pos = self._thermal_item.mapFromScene(scene_pos)
         
-        # Create spot ROI model with default radius
-        spot_model = SpotROI(
-            x=thermal_pos.x(), 
-            y=thermal_pos.y(), 
-            radius=10.0,  # Default radius in thermal pixels
-            name=f"Spot_{len(self._main_window.rois)+1}"
-        )
-        spot_model.emissivity = 0.95
+        # Default radius in thermal pixels
+        default_radius = 10.0
         
-        # Create graphics item as child of thermal item
-        spot_item = SpotROIItem(spot_model, parent=self._thermal_item)
-        spot_item.setZValue(10)
+        # Emit signal with thermal image coordinates
+        self.spot_roi_drawn.emit(thermal_pos, default_radius)
         
-        # Register in collections
-        self._main_window.rois.append(spot_model)
-        self._main_window.roi_items[spot_model.id] = spot_item
+        # Request drawing tool deactivation
+        self.drawing_tool_deactivation_requested.emit()
         
-        # Update analysis/table
-        self._main_window.update_roi_analysis()
-        
-        # Per-ROI color (cycle through HSV wheel)
-        hue = (len(self._main_window.rois) * 55) % 360
-        color = QColor.fromHsv(hue, 220, 255)
-        spot_model.color = color
-        spot_item.set_color(color)
-        
-        print(f"Created Spot ROI: {spot_model}")
+        print(f"Emitted spot ROI signal at: {thermal_pos.x():.1f}, {thermal_pos.y():.1f}")
 
     def _add_polygon_point(self, event: QMouseEvent):
         """Add a point to the polygon being constructed.
@@ -763,15 +742,14 @@ class ImageGraphicsView(QGraphicsView):
         
         print("✅ Polygon completed!")
         
-        # Create final polygon ROI
-        self._create_polygon_from_points(self._current_polygon_points)
+        # Emit signal for polygon ROI creation
+        self._emit_polygon_roi_signal(self._current_polygon_points.copy())
         
         # Reset state and clean temporary polygon
         self._cancel_polygon_drawing()
         
-        # Deactivate polygon drawing mode
-        if self._main_window and hasattr(self._main_window, 'deactivate_drawing_tools'):
-            self._main_window.deactivate_drawing_tools()
+        # Request drawing tool deactivation
+        self.drawing_tool_deactivation_requested.emit()
 
     def _cancel_polygon_drawing(self):
         """Cancel polygon drawing and clean state."""
@@ -786,48 +764,20 @@ class ImageGraphicsView(QGraphicsView):
         self._polygon_drawing = False
         self._current_polygon_points = []
 
-    def _create_polygon_from_points(self, points):
-        """Create a polygon ROI from drawn points.
+    def _emit_polygon_roi_signal(self, points):
+        """Emit signal for polygon ROI creation.
         
         Args:
             points (list): List of (x, y) coordinate tuples in thermal image space.
         """
-        if not self._main_window:
-            return
-            
-        # Import here to avoid circular imports
-        from analysis.roi_models import PolygonROI
-        from ui.roi_items import PolygonROIItem
-        
         # Close polygon if necessary
         if points[0] != points[-1]:
             points.append(points[0])
         
-        # Create polygon ROI model
-        polygon_model = PolygonROI(
-            points=points,
-            name=f"Polygon_{len(self._main_window.rois)+1}"
-        )
-        polygon_model.emissivity = 0.95
+        # Emit signal with thermal image coordinates
+        self.polygon_roi_drawn.emit(points)
         
-        # Create graphics item as child of thermal item
-        polygon_item = PolygonROIItem(polygon_model, parent=self._thermal_item)
-        polygon_item.setZValue(10)
-        
-        # Register in collections
-        self._main_window.rois.append(polygon_model)
-        self._main_window.roi_items[polygon_model.id] = polygon_item
-        
-        # Update analysis/table
-        self._main_window.update_roi_analysis()
-        
-        # Per-ROI color (cycle through HSV wheel)
-        hue = (len(self._main_window.rois) * 55) % 360
-        color = QColor.fromHsv(hue, 220, 255)
-        polygon_model.color = color
-        polygon_item.set_color(color)
-        
-        print(f"Created Polygon ROI: {polygon_model}")
+        print(f"Emitted polygon ROI signal with {len(points)} points")
 
     def get_zoom_factor(self) -> float:
         """Get current zoom factor.
@@ -913,9 +863,7 @@ class ImageGraphicsView(QGraphicsView):
         """
         # ENTER completes polygon
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            if (self._main_window and 
-                hasattr(self._main_window, 'current_drawing_tool') and 
-                self._main_window.current_drawing_tool == "polygon" and 
+            if (self._current_drawing_tool == "polygon" and 
                 self._polygon_drawing):
                 
                 self._finish_polygon_drawing()
@@ -924,18 +872,43 @@ class ImageGraphicsView(QGraphicsView):
         
         # ESC stops ROI drawing mode
         if event.key() == Qt.Key_Escape:
-            if (self._main_window and 
-                hasattr(self._main_window, 'current_drawing_tool') and 
-                self._main_window.current_drawing_tool is not None):
+            if self._current_drawing_tool is not None:
                 
                 # If we were drawing a polygon, clean up
                 if self._polygon_drawing:
                     print("❌ Polygon drawing cancelled")
                     self._cancel_polygon_drawing()
                 
-                self._main_window.deactivate_drawing_tools()
+                # Request drawing tool deactivation
+                self.drawing_tool_deactivation_requested.emit()
                 event.accept()
                 return
         
         super().keyPressEvent(event)
+        
+    def notify_roi_modified(self, roi_model):
+        """Notify that a ROI has been modified.
+        
+        This method is called by ROI items when they are moved or resized.
+        
+        Args:
+            roi_model: The ROI model that was modified.
+        """
+        self.roi_modified.emit(roi_model)
+        
+    def set_roi_label_settings(self, settings: dict):
+        """Set the ROI label display settings.
+        
+        Args:
+            settings (dict): Dictionary with label visibility settings.
+        """
+        self._roi_label_settings = settings
+
+    def get_roi_label_settings(self) -> dict:
+        """Get the current ROI label display settings.
+        
+        Returns:
+            dict: Dictionary with label visibility settings.
+        """
+        return self._roi_label_settings
         

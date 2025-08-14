@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.1,
+    "Emissivity": 0.98,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5
@@ -9,64 +9,52 @@
   "rois": [
     {
       "type": "SpotROI",
-      "name": "Spot_1",
-      "emissivity": 0.1,
-      "x": 235.20516777666145,
-      "y": 93.42658670561143,
-      "radius": 10.0
+      "name": "saasas",
+      "emissivity": 0.95,
+      "x": 196.44328835164578,
+      "y": 162.8895780980573,
+      "radius": 37.47300215982719
     },
     {
-      "type": "SpotROI",
-      "name": "Spot_2",
+      "type": "PolygonROI",
+      "name": "Polygon_2",
       "emissivity": 0.95,
-      "x": 106.49410822362854,
-      "y": 107.23678622846904,
-      "radius": 40.93484693120105
+      "points": [
+        [
+          101.2913059598284,
+          37.50754762507283
+        ],
+        [
+          105.95653274168585,
+          102.82072257107716
+        ],
+        [
+          182.15523684535754,
+          101.26564697712466
+        ],
+        [
+          101.2913059598284,
+          37.50754762507283
+        ]
+      ]
     },
     {
       "type": "RectROI",
       "name": "ROI_3",
       "emissivity": 0.95,
-      "x": 54,
-      "y": 170,
-      "width": 107.16714829737502,
-      "height": 36.45892674034408
-    },
-    {
-      "type": "PolygonROI",
-      "name": "Polygon_4",
-      "emissivity": 0.95,
-      "points": [
-        [
-          206.47995276911766,
-          169.10648009087112
-        ],
-        [
-          263.377974803291,
-          168.5540721099568
-        ],
-        [
-          268.34964663151976,
-          201.69855096481507
-        ],
-        [
-          204.82272882637474,
-          203.35577490755796
-        ],
-        [
-          206.47995276911766,
-          169.10648009087112
-        ]
-      ]
+      "x": 26,
+      "y": 158,
+      "width": 93.95283690656248,
+      "height": 63.47985240199861
     }
   ],
-  "palette": "Iron",
+  "palette": "Autumn",
   "palette_inverted": false,
   "overlay_settings": {
     "scale": 0.737,
     "offset_x": -10,
     "offset_y": -21,
-    "opacity": 100,
-    "blend_mode": "Normal"
+    "opacity": 50,
+    "blend_mode": "Overlay"
   }
 }

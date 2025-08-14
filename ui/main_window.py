@@ -1,235 +1,272 @@
 """
-Main window module for the Warmish thermal analysis application.
+Thermal Analyzer NG - Main Window Module
 
-This module contains the ThermalAnalyzerNG class which implements the main GUI
-window for thermal image analysis. It provides functionality for loading FLIR
-thermal images, analyzing temperature data, creating regions of interest (ROI),
-and visualizing thermal data with various color palettes.
-
-Classes:
-    ThermalAnalyzerNG: Main application window with thermal analysis capabilities.
+This module contains the main application window for the thermal imaging analysis
+application, providing a complete interface for loading, processing, and analyzing
+FLIR thermal images with advanced ROI (Region of Interest) capabilities.
 """
 
-import json
-import io
 import os
+
+import json
 import subprocess
-import exiftool
+import io
 import numpy as np
+
+
+# Third-party imports
+import exiftool
 from PIL import Image
+
 import matplotlib.cm as cm
 
 from PySide6.QtWidgets import (
-    QMainWindow, QLabel, QVBoxLayout, QHBoxLayout, QWidget,
-    QFileDialog, QMessageBox, QTextEdit, QLineEdit, QFormLayout,
-    QGroupBox, QTabWidget, QToolBar, QComboBox, QSizePolicy as QSP,
-    QCheckBox, QPushButton, QSlider, QDoubleSpinBox, QSpinBox,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QLineEdit, QPushButton, QLabel, QTextEdit, QTabWidget,
+    QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
+    QCheckBox, QFileDialog, QMessageBox, QSlider, QSpinBox,
+    QDoubleSpinBox, QComboBox, QApplication, QToolBar
 )
-from PySide6.QtGui import QAction, QPixmap, QImage, QIcon, QPainter
-from PySide6.QtCore import Qt, QPointF, QSignalBlocker
+from PySide6.QtCore import Qt, QPointF, QRectF, QSignalBlocker
+from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QAction, QKeySequence
 
-from constants import PALETTE_MAP
-from .widgets.color_bar_legend import ColorBarLegend
-from .widgets.image_graphics_view import ImageGraphicsView
+from ui.widgets.image_graphics_view import ImageGraphicsView
+from ui.widgets.color_bar_legend import ColorBarLegend
+from constants import *
 
 
 class ThermalAnalyzerNG(QMainWindow):
     """
-    Main window for thermal image analysis application.
+    Main window for the Thermal Analyzer NG application.
     
-    This class provides a comprehensive interface for loading, analyzing, and
-    visualizing FLIR thermal images. It supports ROI creation, temperature
-    calculations with environmental corrections, and various visualization modes.
-    
-    Attributes:
-        thermal_data (np.ndarray): Raw thermal data from FLIR image.
-        temperature_data (np.ndarray): Calculated temperature matrix in Celsius.
-        metadata (dict): EXIF metadata extracted from thermal image.
-        rois (list): List of region of interest models.
-        overlay_mode (bool): Whether overlay mode is active.
+    Provides a comprehensive interface for thermal image analysis including:
+    - FLIR thermal image loading and processing
+    - Temperature calculation with environmental corrections
+    - ROI (Region of Interest) creation and analysis
+    - Image overlay capabilities
+    - Batch processing and export functionality
     """
     
-    def __init__(self):
-        """Initialize the thermal analyzer main window."""
-        super().__init__()
-        self.setWindowTitle("Warmish")
-        self.setGeometry(100, 100, 1400, 900)
+    def __init__(self, parent=None):
+        """Initialize the main window and setup the user interface."""
+        super().__init__(parent)
         
-        self._setup_toolbar()
-        self._init_state_variables()
-        self._setup_main_layout()
-        self._setup_image_views()
-        self._setup_sidebar_tabs()
+        self.setWindowTitle("Thermal Analyzer NG")
+        self.setMinimumSize(1200, 800)
+        
+        # Initialize data storage
         self._init_data_storage()
         
+        # Setup menu bar and toolbar FIRST
+        self._setup_menu_bar()
+        self._setup_toolbar()
+        
+        # Setup main UI layout
+        self._setup_main_layout()
+        
+        # Setup sidebar with tabs
+        self._setup_sidebar_tabs()
+        
+        # Connect signals after UI is created
+        self._connect_ui_signals()
+        
+        print("Main window initialization completed.")
+
+    def _setup_menu_bar(self):
+        """Setup the application menu bar."""
+        menubar = self.menuBar()
+        
+        # File Menu
+        file_menu = menubar.addMenu('&File')
+        
+        # Open action
+        open_action = QAction('&Open Image...', self)
+        open_action.setShortcut(QKeySequence.Open)
+        open_action.setStatusTip('Open a thermal image file')
+        open_action.triggered.connect(self.open_image)
+        file_menu.addAction(open_action)
+        
+        file_menu.addSeparator()
+        
+        # Exit action
+        exit_action = QAction('E&xit', self)
+        exit_action.setShortcut(QKeySequence.Quit)
+        exit_action.setStatusTip('Exit application')
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # View Menu
+        view_menu = menubar.addMenu('&View')
+        
+        # Zoom actions
+        zoom_in_action = QAction('Zoom &In', self)
+        zoom_in_action.setShortcut(QKeySequence.ZoomIn)
+        zoom_in_action.setStatusTip('Zoom in')
+        zoom_in_action.triggered.connect(self.zoom_in)
+        view_menu.addAction(zoom_in_action)
+        
+        zoom_out_action = QAction('Zoom &Out', self)
+        zoom_out_action.setShortcut(QKeySequence.ZoomOut)
+        zoom_out_action.setStatusTip('Zoom out')
+        zoom_out_action.triggered.connect(self.zoom_out)
+        view_menu.addAction(zoom_out_action)
+        
+        zoom_reset_action = QAction('&Reset Zoom', self)
+        zoom_reset_action.setShortcut('Ctrl+0')
+        zoom_reset_action.setStatusTip('Reset zoom to fit')
+        zoom_reset_action.triggered.connect(self.zoom_reset)
+        view_menu.addAction(zoom_reset_action)
+        
+        view_menu.addSeparator()
+        
+        # Overlay toggle
+        overlay_action = QAction('Toggle &Overlay', self)
+        overlay_action.setCheckable(True)
+        overlay_action.setShortcut('Ctrl+O')
+        overlay_action.setStatusTip('Toggle overlay mode')
+        overlay_action.triggered.connect(self.on_overlay_toggled)
+        view_menu.addAction(overlay_action)
+        
+        # Store overlay action for later use
+        self.overlay_action = overlay_action
+        
+        # Tools Menu
+        tools_menu = menubar.addMenu('&Tools')
+        
+        # ROI tools
+        rect_roi_action = QAction('&Rectangle ROI', self)
+        rect_roi_action.setShortcut('R')
+        rect_roi_action.setStatusTip('Create rectangular ROI')
+        rect_roi_action.triggered.connect(self.activate_rect_tool)
+        tools_menu.addAction(rect_roi_action)
+        
+        spot_roi_action = QAction('&Spot ROI', self)
+        spot_roi_action.setShortcut('S')
+        spot_roi_action.setStatusTip('Create spot ROI')
+        spot_roi_action.triggered.connect(self.activate_spot_tool)
+        tools_menu.addAction(spot_roi_action)
+        
+        polygon_roi_action = QAction('&Polygon ROI', self)
+        polygon_roi_action.setShortcut('P')
+        polygon_roi_action.setStatusTip('Create polygon ROI')
+        polygon_roi_action.triggered.connect(self.activate_polygon_tool)
+        tools_menu.addAction(polygon_roi_action)
+        
+        tools_menu.addSeparator()
+        
+        # Clear ROIs
+        clear_rois_action = QAction('&Clear All ROIs', self)
+        clear_rois_action.setShortcut('Ctrl+Shift+C')
+        clear_rois_action.setStatusTip('Clear all ROIs')
+        clear_rois_action.triggered.connect(self.clear_all_rois)
+        tools_menu.addAction(clear_rois_action)
+
     def _setup_toolbar(self):
-        """Setup the main toolbar with all actions and controls."""
-        self.toolbar = QToolBar("Main Toolbar")
-        self.addToolBar(Qt.TopToolBarArea, self.toolbar)
-        self.toolbar.setMovable(False)
+        """Setup the main toolbar."""
+        toolbar = QToolBar('Main Toolbar', self)
+        toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.addToolBar(toolbar)
         
-        self.action_open = QAction(QIcon(), "Load Image", self)
-        self.action_open.triggered.connect(self.open_image)
-        self.toolbar.addAction(self.action_open)
+        # Open button
+        open_action = QAction('📁 Open', self)
+        open_action.setStatusTip('Open thermal image file')
+        open_action.triggered.connect(self.open_image)
+        toolbar.addAction(open_action)
         
-        self.action_export = QAction(QIcon(), "Export", self)
-        self.toolbar.addAction(self.action_export)
-        self.toolbar.addSeparator()
+        toolbar.addSeparator()
         
-        self._setup_palette_controls()
-        self._setup_overlay_controls()
-        self._setup_zoom_controls()
+        # Zoom controls
+        zoom_in_action = QAction('🔍+ Zoom In', self)
+        zoom_in_action.setStatusTip('Zoom in')
+        zoom_in_action.triggered.connect(self.zoom_in)
+        toolbar.addAction(zoom_in_action)
         
-    def _setup_palette_controls(self):
-        """Setup palette selection and inversion controls."""
-        self.palette_combo = QComboBox()
-        self.palette_combo.addItems([
-            "Iron", "Rainbow", "Grayscale", "Lava", "Arctic", "Glowbow", 
-            "Amber", "Sepia", "Plasma", "Viridis", "Magma", "Cividis", 
-            "Turbo", "Ocean", "Terrain", "Jet", "Fire", "Ice", "Spring", 
-            "Summer", "Autumn", "Bone", "Pink", "Coolwarm", "RdYlBu", 
-            "Spectral", "BrBG", "PiYG", "PRGn", "RdBu", "RdGy", 
-            "Purples", "Blues", "Greens", "Oranges", "Reds"
-        ])
-        self.palette_combo.setCurrentIndex(0)
-        self.palette_combo.setToolTip("Select thermal palette")
-        self.toolbar.addWidget(self.palette_combo)
+        zoom_out_action = QAction('🔍- Zoom Out', self)
+        zoom_out_action.setStatusTip('Zoom out')
+        zoom_out_action.triggered.connect(self.zoom_out)
+        toolbar.addAction(zoom_out_action)
         
-        self.action_invert_palette = QAction("Invert Palette", self)
-        self.action_invert_palette.triggered.connect(self.on_invert_palette)
-        self.toolbar.addAction(self.action_invert_palette)
-        self.toolbar.addSeparator()
+        zoom_reset_action = QAction('🔍= Reset', self)
+        zoom_reset_action.setStatusTip('Reset zoom to fit')
+        zoom_reset_action.triggered.connect(self.zoom_reset)
+        toolbar.addAction(zoom_reset_action)
         
-    def _setup_overlay_controls(self):
-        """Setup overlay mode controls including opacity, scale, and offset."""
-        self.action_overlay_view = QAction("Overlay", self)
-        self.action_overlay_view.setCheckable(True)
-        self.action_overlay_view.toggled.connect(self.on_overlay_toggled)
-        self.toolbar.addAction(self.action_overlay_view)
+        toolbar.addSeparator()
         
-        self.overlay_controls_widget = QWidget()
-        _ovl = QHBoxLayout(self.overlay_controls_widget)
-        _ovl.setContentsMargins(0, 0, 0, 0)
-        _ovl.setSpacing(6)
+        # ROI tools
+        rect_roi_action = QAction('⬜ Rectangle', self)
+        rect_roi_action.setStatusTip('Create rectangular ROI')
+        rect_roi_action.triggered.connect(self.activate_rect_tool)
+        toolbar.addAction(rect_roi_action)
         
-        from PySide6.QtWidgets import QLabel as _QLabel
-        _ovl.addWidget(_QLabel("Opacity"))
-        self.overlay_alpha_slider = QSlider(Qt.Horizontal)
-        self.overlay_alpha_slider.setRange(0, 100)
-        self.overlay_alpha_slider.setValue(50)
-        self.overlay_alpha_slider.setToolTip("Thermal opacity in overlay")
-        self.overlay_alpha_slider.setMinimumWidth(160)
-        self.overlay_alpha_slider.setMaximumWidth(260)
-        self.overlay_alpha_slider.setSizePolicy(QSP.Preferred, QSP.Fixed)
-        self.overlay_alpha_slider.valueChanged.connect(self.on_overlay_alpha_changed)
-        _ovl.addWidget(self.overlay_alpha_slider)
+        spot_roi_action = QAction('🎯 Spot', self)
+        spot_roi_action.setStatusTip('Create spot ROI')
+        spot_roi_action.triggered.connect(self.activate_spot_tool)
+        toolbar.addAction(spot_roi_action)
         
-        self.scale_spin = QDoubleSpinBox()
-        self.scale_spin.setDecimals(3)
-        self.scale_spin.setRange(0.100, 5.000)
-        self.scale_spin.setSingleStep(0.01)
-        self.scale_spin.setPrefix("Scale ")
-        self.scale_spin.setValue(1.0)
-        self.scale_spin.setToolTip("IR scale relative to visible (Real2IR)")
-        self.scale_spin.valueChanged.connect(self.on_scale_spin_changed)
-        _ovl.addWidget(self.scale_spin)
+        polygon_roi_action = QAction('🔶 Polygon', self)
+        polygon_roi_action.setStatusTip('Create polygon ROI')
+        polygon_roi_action.triggered.connect(self.activate_polygon_tool)
+        toolbar.addAction(polygon_roi_action)
         
-        self.offsetx_spin = QSpinBox()
-        self.offsetx_spin.setRange(-2000, 2000)
-        self.offsetx_spin.setSingleStep(1)
-        self.offsetx_spin.setPrefix("X Offset ")
-        self.offsetx_spin.setToolTip("X offset (visible pixels)")
-        self.offsetx_spin.valueChanged.connect(self.on_offsetx_changed)
-        _ovl.addWidget(self.offsetx_spin)
+        toolbar.addSeparator()
         
-        self.offsety_spin = QSpinBox()
-        self.offsety_spin.setRange(-2000, 2000)
-        self.offsety_spin.setSingleStep(1)
-        self.offsety_spin.setPrefix("Y Offset ")
-        self.offsety_spin.setToolTip("Y offset (visible pixels)")
-        self.offsety_spin.valueChanged.connect(self.on_offsety_changed)
-        _ovl.addWidget(self.offsety_spin)
+        # Overlay toggle
+        overlay_toggle_action = QAction('🔄 Overlay', self)
+        overlay_toggle_action.setCheckable(True)
+        overlay_toggle_action.setStatusTip('Toggle overlay mode')
+        overlay_toggle_action.triggered.connect(self.on_overlay_toggled)
+        toolbar.addAction(overlay_toggle_action)
         
-        self.blend_combo = QComboBox()
-        self.blend_combo.addItems([
-            "Normal", "Multiply", "Screen", "Overlay", "Darken", "Lighten",
-            "ColorDodge", "ColorBurn", "SoftLight", "HardLight", 
-            "Difference", "Exclusion", "Additive"
-        ])
-        self.blend_combo.setCurrentText("Normal")
-        self.blend_combo.setToolTip("Thermal overlay blending method")
-        self.blend_combo.currentTextChanged.connect(self.on_blend_mode_changed)
-        _ovl.addWidget(self.blend_combo)
-        
-        self.overlay_action = self.toolbar.addWidget(self.overlay_controls_widget)
-        
-        self.action_reset_align = QAction("Reset Alignment", self)
-        self.action_reset_align.setToolTip("Restore scale and offset from metadata")
-        self.action_reset_align.triggered.connect(self.on_reset_alignment)
-        self.toolbar.addAction(self.action_reset_align)
-        self.toolbar.addSeparator()
-        
-        self.set_overlay_controls_visible(False)
-        
-    def _setup_zoom_controls(self):
-        """Setup zoom in, zoom out, and reset zoom controls."""
-        self.action_zoom_in = QAction("Zoom +", self)
-        self.action_zoom_in.triggered.connect(self.zoom_in)
-        self.toolbar.addAction(self.action_zoom_in)
-        
-        self.action_zoom_out = QAction("Zoom -", self)
-        self.action_zoom_out.triggered.connect(self.zoom_out)
-        self.toolbar.addAction(self.action_zoom_out)
-        
-        self.action_zoom_reset = QAction("Reset Zoom", self)
-        self.action_zoom_reset.triggered.connect(self.zoom_reset)
-        self.toolbar.addAction(self.action_zoom_reset)
-        self.toolbar.addSeparator()
-        
-        # Spacer to push other toolbar elements to the left
-        self.toolbar.addWidget(QWidget())
-        self.toolbar.widgetForAction(self.toolbar.actions()[-1]).setSizePolicy(
-            QSP.Expanding, QSP.Preferred
-        )
-        
-    def _init_state_variables(self):
-        """Initialize application state variables."""
-        self.zoom_factor = 1.0
-        self.pan_offset = [0, 0]
-        self._panning = False
-        self._pan_start = None
-        
+        # Store toolbar overlay action too
+        self.toolbar_overlay_action = overlay_toggle_action
+
     def _setup_main_layout(self):
-        """Setup the main window layout with central widget."""
+        """Setup the main application layout with image views and controls."""
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
-        self.main_layout = QHBoxLayout(self.central_widget)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setSpacing(0)
         
-    def _setup_image_views(self):
-        """Setup image viewing area with primary and secondary views."""
-        # Image area widget
+        # Main horizontal layout
+        self.main_layout = QHBoxLayout(self.central_widget)
+        self.main_layout.setContentsMargins(8, 8, 8, 8)
+        self.main_layout.setSpacing(12)
+        
+        # Create image area layout
         self.image_area_widget = QWidget()
         self.image_area_layout = QVBoxLayout(self.image_area_widget)
-        self.image_area_layout.setContentsMargins(24, 24, 24, 24)
+        self.image_area_layout.setContentsMargins(0, 0, 0, 0)
         self.image_area_layout.setSpacing(8)
-        self.main_layout.addWidget(self.image_area_widget, stretch=4)
         
         # Primary image view (thermal)
         self.image_view = ImageGraphicsView()
         self.image_view.setStyleSheet("border: 1px solid gray; background-color: #333;")
+        
+        # Connect existing signals
         self.image_view.mouse_moved_on_thermal.connect(self.on_thermal_mouse_move)
-        self.image_view.set_main_window(self)
+        
+        # Connect new ROI creation signals
+        self.image_view.rect_roi_drawn.connect(self.create_rect_roi)
+        self.image_view.spot_roi_drawn.connect(self.create_spot_roi)
+        self.image_view.polygon_roi_drawn.connect(self.create_polygon_roi)
+        self.image_view.drawing_tool_deactivation_requested.connect(self.deactivate_drawing_tools)
+        
+        # Connect ROI modification signal
+        self.image_view.roi_modified.connect(self.on_roi_modified)
+
         self.image_area_layout.addWidget(self.image_view, stretch=1)
         
         # Secondary image view (visible light)
         self.secondary_image_view = ImageGraphicsView()
         self.secondary_image_view.setStyleSheet("border: 1px solid gray; background-color: #222;")
-        self.secondary_image_view.set_main_window(self)
+        
+        # Connect signals for secondary view
+        self.secondary_image_view.drawing_tool_deactivation_requested.connect(self.deactivate_drawing_tools)
         self.secondary_image_view.set_allow_roi_drawing(False)
+        
         self.image_area_layout.addWidget(self.secondary_image_view, stretch=1)
+        
+        # Add image area to main layout
+        self.main_layout.addWidget(self.image_area_widget, stretch=3)
         
         self.sync_views()
         
@@ -251,7 +288,7 @@ class ThermalAnalyzerNG(QMainWindow):
         self.legend_layout.addWidget(self.colorbar, alignment=Qt.AlignCenter)
         self.legend_groupbox.setMaximumWidth(140)
         self.main_layout.addWidget(self.legend_groupbox, stretch=0)
-        
+
     def _setup_sidebar_tabs(self):
         """Setup the sidebar with parameters, ROI analysis, and batch processing tabs."""
         self.sidebar_tabs = QTabWidget()
@@ -261,7 +298,93 @@ class ThermalAnalyzerNG(QMainWindow):
         
         self._setup_parameters_tab()
         self._setup_roi_analysis_tab()
+        self._setup_overlay_tab()  # Add this new tab
         self._setup_batch_export_tab()
+
+    def _setup_overlay_tab(self):
+        """Setup the overlay controls tab."""
+        self.tab_overlay = QWidget()
+        self.tab_overlay_layout = QVBoxLayout(self.tab_overlay)
+        self.tab_overlay_layout.setContentsMargins(16, 16, 16, 16)
+        self.tab_overlay_layout.setSpacing(12)
+        
+        # Overlay toggle group
+        self.overlay_groupbox = QGroupBox("Overlay Mode")
+        self.overlay_layout = QFormLayout(self.overlay_groupbox)
+        
+        # Overlay toggle checkbox
+        self.overlay_checkbox = QCheckBox("Enable Overlay")
+        self.overlay_checkbox.toggled.connect(self.on_overlay_toggled)
+        self.overlay_layout.addRow("", self.overlay_checkbox)
+        
+        # Opacity slider
+        self.overlay_alpha_label = QLabel("Opacity: 50%")
+        self.overlay_alpha_slider = QSlider(Qt.Horizontal)
+        self.overlay_alpha_slider.setMinimum(0)
+        self.overlay_alpha_slider.setMaximum(100)
+        self.overlay_alpha_slider.setValue(50)
+        self.overlay_alpha_slider.valueChanged.connect(self.on_overlay_alpha_changed)
+        self.overlay_alpha_slider.valueChanged.connect(
+            lambda v: self.overlay_alpha_label.setText(f"Opacity: {v}%")
+        )
+        self.overlay_layout.addRow(self.overlay_alpha_label, self.overlay_alpha_slider)
+        
+        self.tab_overlay_layout.addWidget(self.overlay_groupbox)
+        
+        # Alignment controls group
+        self.alignment_groupbox = QGroupBox("Alignment Controls")
+        self.alignment_layout = QFormLayout(self.alignment_groupbox)
+        
+        # Scale control
+        self.scale_spin = QDoubleSpinBox()
+        self.scale_spin.setMinimum(0.1)
+        self.scale_spin.setMaximum(5.0)
+        self.scale_spin.setSingleStep(0.01)
+        self.scale_spin.setDecimals(3)
+        self.scale_spin.setValue(1.0)
+        self.scale_spin.valueChanged.connect(self.on_scale_spin_changed)
+        self.alignment_layout.addRow("Scale Factor:", self.scale_spin)
+        
+        # X offset control
+        self.offsetx_spin = QSpinBox()
+        self.offsetx_spin.setMinimum(-1000)
+        self.offsetx_spin.setMaximum(1000)
+        self.offsetx_spin.setValue(0)
+        self.offsetx_spin.valueChanged.connect(self.on_offsetx_changed)
+        self.alignment_layout.addRow("X Offset (px):", self.offsetx_spin)
+        
+        # Y offset control
+        self.offsety_spin = QSpinBox()
+        self.offsety_spin.setMinimum(-1000)
+        self.offsety_spin.setMaximum(1000)
+        self.offsety_spin.setValue(0)
+        self.offsety_spin.valueChanged.connect(self.on_offsety_changed)
+        self.alignment_layout.addRow("Y Offset (px):", self.offsety_spin)
+        
+        # Reset alignment button
+        self.reset_alignment_button = QPushButton("Reset to Metadata")
+        self.reset_alignment_button.clicked.connect(self.on_reset_alignment)
+        self.alignment_layout.addRow("", self.reset_alignment_button)
+        
+        self.tab_overlay_layout.addWidget(self.alignment_groupbox)
+        
+        # Blend mode group
+        self.blend_groupbox = QGroupBox("Blend Mode")
+        self.blend_layout = QFormLayout(self.blend_groupbox)
+        
+        # Blend mode combo
+        self.blend_combo = QComboBox()
+        blend_modes = ["Normal", "Multiply", "Screen", "Overlay", "Difference", "HardLight"]
+        self.blend_combo.addItems(blend_modes)
+        self.blend_combo.currentTextChanged.connect(self.on_blend_mode_changed)
+        self.blend_layout.addRow("Blend Mode:", self.blend_combo)
+        
+        self.tab_overlay_layout.addWidget(self.blend_groupbox)
+        
+        # Add stretch to push everything to top
+        self.tab_overlay_layout.addStretch()
+        
+        self.sidebar_tabs.addTab(self.tab_overlay, "Overlay")
         
     def _setup_parameters_tab(self):
         """Setup the thermal parameters configuration tab."""
@@ -298,6 +421,25 @@ class ThermalAnalyzerNG(QMainWindow):
         self.params_layout.addRow("", self.reset_params_button)
         
         self.tab_params_layout.addWidget(self.params_groupbox)
+        
+        # Palette selection group
+        self.palette_groupbox = QGroupBox("Color Palette")
+        self.palette_layout = QFormLayout(self.palette_groupbox)
+        
+        # Palette combo box
+        self.palette_combo = QComboBox()
+        palette_names = list(PALETTE_MAP.keys())
+        self.palette_combo.addItems(palette_names)
+        self.palette_combo.setCurrentText("Iron")  # Set default
+        self.palette_layout.addRow("Palette:", self.palette_combo)
+        
+        # Palette invert button
+        self.invert_palette_button = QPushButton("Invert Palette")
+        self.invert_palette_button.setCheckable(True)
+        self.invert_palette_button.clicked.connect(self.on_invert_palette)
+        self.palette_layout.addRow("", self.invert_palette_button)
+        
+        self.tab_params_layout.addWidget(self.palette_groupbox)
         
         # Metadata display
         self.all_meta_display = QTextEdit("All extracted metadata will appear here.")
@@ -498,22 +640,17 @@ class ThermalAnalyzerNG(QMainWindow):
         self.sidebar_tabs.addTab(self.tab_batch, "Batch & Export")
         
     def _init_data_storage(self):
-        """Initialize data storage variables and connect signals."""
+        """Initialize data storage variables."""
         # Thermal data storage
         self.thermal_data = None
         self.temperature_data = None
-        self.temp_min = 0
-        self.temp_max = 0
         self.metadata = None
-        
-        # Image storage
         self.base_pixmap = None
         self.base_pixmap_visible = None
         
-        # Palette settings
+        # Palette settings (don't connect signals here - UI not ready yet)
         self.selected_palette = "Iron"
         self.palette_inverted = False
-        self.palette_combo.currentIndexChanged.connect(self.on_palette_changed)
         
         # Overlay settings
         self.overlay_mode = False
@@ -539,8 +676,9 @@ class ThermalAnalyzerNG(QMainWindow):
         self.current_image_path = None
         self._ignore_auto_save = False
         
-        # Make secondary view visible by default
-        self.secondary_image_view.setVisible(True)
+        # Temperature range
+        self.temp_min = 0.0
+        self.temp_max = 100.0
 
     def reset_application_state(self):
         """
@@ -695,16 +833,22 @@ class ThermalAnalyzerNG(QMainWindow):
                 
                 # Update UI controls with metadata values
                 try:
-                    self.scale_spin.blockSignals(True)
-                    self.scale_spin.setValue(self.overlay_scale)
-                    self.offsetx_spin.blockSignals(True)
-                    self.offsetx_spin.setValue(int(round(self.overlay_offset_x)))
-                    self.offsety_spin.blockSignals(True)
-                    self.offsety_spin.setValue(int(round(self.overlay_offset_y)))
+                    if hasattr(self, 'scale_spin'):
+                        self.scale_spin.blockSignals(True)
+                        self.scale_spin.setValue(self.overlay_scale)
+                    if hasattr(self, 'offsetx_spin'):
+                        self.offsetx_spin.blockSignals(True)
+                        self.offsetx_spin.setValue(int(round(self.overlay_offset_x)))
+                    if hasattr(self, 'offsety_spin'):
+                        self.offsety_spin.blockSignals(True)
+                        self.offsety_spin.setValue(int(round(self.overlay_offset_y)))
                 finally:
-                    self.scale_spin.blockSignals(False)
-                    self.offsetx_spin.blockSignals(False)
-                    self.offsety_spin.blockSignals(False)
+                    if hasattr(self, 'scale_spin'):
+                        self.scale_spin.blockSignals(False)
+                    if hasattr(self, 'offsetx_spin'):
+                        self.offsetx_spin.blockSignals(False)
+                    if hasattr(self, 'offsety_spin'):
+                        self.offsety_spin.blockSignals(False)
                     
             # Populate thermal calculation parameters from metadata
             self.populate_params()
@@ -763,7 +907,7 @@ class ThermalAnalyzerNG(QMainWindow):
                 
                 # Convert to QPixmap for display
                 data = image_rgb.tobytes("raw", "RGB")
-                qimage = QImage(data, image_rgb.width, image_rgb.height, QImage.Format_RGB888)
+                qimage = QImage(data, image_rgb.width, image_rgb.height, image_rgb.width * 3, QImage.Format_RGB888)
                 pixmap = QPixmap.fromImage(qimage)
                 self.base_pixmap_visible = pixmap
                 self.overlay_mode = False
@@ -1346,18 +1490,23 @@ class ThermalAnalyzerNG(QMainWindow):
             self.secondary_image_view.reset_zoom()
             
     def on_overlay_toggled(self, checked: bool):
-        """
-        Handle overlay mode toggle.
+        """Handle overlay mode toggle.
         
         Args:
             checked (bool): Whether overlay mode is enabled.
         """
         self.overlay_mode = checked
+        
+        # Sync both menu and toolbar actions
+        if hasattr(self, 'overlay_action'):
+            self.overlay_action.setChecked(checked)
+        if hasattr(self, 'toolbar_overlay_action'):
+            self.toolbar_overlay_action.setChecked(checked)
+        
+        # Update overlay controls visibility
         self.set_overlay_controls_visible(checked)
         
-        if checked and self.base_pixmap_visible is not None:
-            self.image_view.set_visible_pixmap(self.base_pixmap_visible)
-        
+        # Update image display
         self.display_images()
 
     def on_overlay_alpha_changed(self, value: int):
@@ -1474,15 +1623,36 @@ class ThermalAnalyzerNG(QMainWindow):
         return mapping.get(self.overlay_blend_mode, QPainter.CompositionMode_SourceOver)
 
     def set_overlay_controls_visible(self, visible: bool):
-        """
-        Set visibility of overlay control widgets.
+        """Set visibility of overlay control widgets.
         
         Args:
             visible (bool): Whether overlay controls should be visible.
         """
+        # Update menu action if it exists
         if hasattr(self, 'overlay_action') and self.overlay_action is not None:
-            self.overlay_action.setVisible(visible)
-        self.action_reset_align.setVisible(visible)
+            self.overlay_action.setChecked(visible)
+        
+        # Update toolbar action if it exists
+        if hasattr(self, 'toolbar_overlay_action') and self.toolbar_overlay_action is not None:
+            self.toolbar_overlay_action.setChecked(visible)
+            
+        # Update overlay checkbox in tab if it exists
+        if hasattr(self, 'overlay_checkbox') and self.overlay_checkbox is not None:
+            self.overlay_checkbox.blockSignals(True)
+            self.overlay_checkbox.setChecked(visible)
+            self.overlay_checkbox.blockSignals(False)
+        
+        # Enable/disable overlay controls based on mode
+        overlay_controls = [
+            'overlay_alpha_slider', 'overlay_alpha_label',
+            'scale_spin', 'offsetx_spin', 'offsety_spin', 
+            'reset_alignment_button', 'blend_combo'
+        ]
+        
+        for control_name in overlay_controls:
+            if hasattr(self, control_name):
+                control = getattr(self, control_name)
+                control.setEnabled(visible)
 
     def resizeEvent(self, event):
         """
@@ -1566,16 +1736,15 @@ class ThermalAnalyzerNG(QMainWindow):
         self.save_settings_to_json()
 
     def update_roi_table(self):
-        """
-        Update the ROI table with current data.
+        """Update the ROI table with current data.
         
-        This method clears all existing rows and repopulates the table
-        with updated ROI data including names, emissivity values, and
+        This method refreshes the ROI analysis table with current ROI data and
         calculated temperature statistics.
         """
         print("Updating ROI table...")
         self._updating_roi_table = True
         
+        blocker = None  # Initialize outside try block
         try:
             # Block signals during update to prevent recursion
             blocker = QSignalBlocker(self.roi_table)
@@ -1622,7 +1791,6 @@ class ThermalAnalyzerNG(QMainWindow):
                 # Make temperature columns read-only and visually distinct
                 for item in [min_item, max_item, avg_item, median_item]:
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                    from PySide6.QtWidgets import QApplication
                     palette = QApplication.palette()
                     disabled_color = palette.color(palette.ColorRole.Window)
                     item.setBackground(disabled_color)
@@ -1635,8 +1803,11 @@ class ThermalAnalyzerNG(QMainWindow):
 
             print(f"ROI table updated with {len(self.rois)} rows")
             
+        except Exception as e:
+            print(f"Error updating ROI table: {e}")
         finally:
-            del blocker  # Re-enable signals
+            if blocker is not None:
+                del blocker  # Re-enable signals
             self._updating_roi_table = False
 
     def calculate_roi_median(self, roi):
@@ -1817,51 +1988,58 @@ class ThermalAnalyzerNG(QMainWindow):
     def activate_spot_tool(self):
         """Activate the spot ROI creation tool."""
         self.current_drawing_tool = "spot"
+        # Set the drawing tool on the image view
+        self.image_view.set_drawing_tool("spot")
         if hasattr(self, "image_view"):
             self.image_view.setCursor(Qt.CrossCursor)
-            
+        
         # Update button states
+        self.btn_spot.setChecked(True)
         self.btn_rect.setChecked(False)
         self.btn_poly.setChecked(False)
-        self.btn_spot.setChecked(True)
+        print("   • Left click to place spot")
+        print("   • ESC: Cancel")
 
     def activate_rect_tool(self):
         """Activate the rectangular ROI creation tool."""
         self.current_drawing_tool = "rect"
+        # Set the drawing tool on the image view
+        self.image_view.set_drawing_tool("rect")
         if hasattr(self, "image_view"):
             self.image_view.setCursor(Qt.CrossCursor)
-            
+        
         # Update button states
+        self.btn_rect.setChecked(True)
         self.btn_spot.setChecked(False)
         self.btn_poly.setChecked(False)
-        self.btn_rect.setChecked(True)
+        print("   • Click and drag to draw rectangle")
+        print("   • ESC: Cancel")
 
     def activate_polygon_tool(self):
         """Activate the polygon ROI creation tool."""
         self.current_drawing_tool = "polygon"
+        # Set the drawing tool on the image view
+        self.image_view.set_drawing_tool("polygon")
         if hasattr(self, "image_view"):
             self.image_view.setCursor(Qt.CrossCursor)
-            self.image_view.setFocus()
-            
+        
         # Update button states
+        self.btn_poly.setChecked(True)
         self.btn_spot.setChecked(False)
         self.btn_rect.setChecked(False)
-        self.btn_poly.setChecked(True)
-        
-        # Print usage instructions
-        print("🔶 Polygon mode activated!")
-        print("   • Left click: Add point")
-        print("   • ENTER or Double-click: Complete polygon") 
-        print("   • Right click: Complete polygon")
+        print("   • Left click to add points")
+        print("   • Right click or ENTER to complete")
         print("   • ESC: Cancel")
 
     def deactivate_drawing_tools(self):
         """Deactivate all ROI drawing tools."""
         self.current_drawing_tool = None
+        # Clear the drawing tool on the image view
+        self.image_view.set_drawing_tool(None)
         if hasattr(self, "image_view"):
             self.image_view.setCursor(Qt.ArrowCursor)
-            
-        # Uncheck all tool buttons
+        
+        # Update button states
         if hasattr(self, "btn_spot"):
             self.btn_spot.setChecked(False)
         if hasattr(self, "btn_rect"):
@@ -2020,10 +2198,16 @@ class ThermalAnalyzerNG(QMainWindow):
             "median": self.cb_label_med.isChecked(),
         }
         
+        # Update ImageGraphicsView with new settings
+        self.image_view.set_roi_label_settings(self.roi_label_settings)
+        
         # Refresh all ROI labels
         for item in self.roi_items.values():
             if hasattr(item, "refresh_label"):
                 item.refresh_label()
+        
+        # Save settings
+        self.save_settings_to_json()
     
     def get_json_file_path(self):
         """
@@ -2332,3 +2516,150 @@ class ThermalAnalyzerNG(QMainWindow):
             self.blend_combo.currentTextChanged.connect(self.save_settings_to_json)
         
         print("Auto-save signals connected")
+        print("Auto-save signals connected")
+        print("Auto-save signals connected")
+
+    def _connect_ui_signals(self):
+        """Connect UI signals after all components are created."""
+        # Connect palette signals
+        self.palette_combo.currentIndexChanged.connect(self.on_palette_changed)
+        
+        # Initialize ROI label settings in the view
+        self.image_view.set_roi_label_settings(self.roi_label_settings)
+        
+        # Connect overlay checkbox to sync with menu/toolbar
+        if hasattr(self, 'overlay_checkbox'):
+            self.overlay_checkbox.toggled.connect(lambda checked: [
+                self.overlay_action.setChecked(checked) if hasattr(self, 'overlay_action') else None,
+                self.toolbar_overlay_action.setChecked(checked) if hasattr(self, 'toolbar_overlay_action') else None
+            ])
+        
+        # Connect auto-save signals
+        self.connect_auto_save_signals()
+        
+        # Make secondary view visible by default
+        self.secondary_image_view.setVisible(True)
+
+    def create_rect_roi(self, thermal_rect: QRectF):
+        """Create a rectangular ROI from the image view signal.
+        
+        Args:
+            thermal_rect (QRectF): Rectangle in thermal image coordinates.
+        """
+        # Import here to avoid circular imports
+        from analysis.roi_models import RectROI
+        from ui.roi_items import RectROIItem
+        
+        # Create model with thermal image coordinates
+        roi_model = RectROI(
+            x=thermal_rect.x(), 
+            y=thermal_rect.y(), 
+            width=thermal_rect.width(), 
+            height=thermal_rect.height(), 
+            name=f"ROI_{len(self.rois)+1}"
+        )
+        roi_model.emissivity = 0.95
+
+        # Create graphics item as child of thermal item
+        roi_item = RectROIItem(roi_model, parent=self.image_view._thermal_item)
+        roi_item.setZValue(10)
+
+        # Register in collections
+        self.rois.append(roi_model)
+        self.roi_items[roi_model.id] = roi_item
+
+        # Update analysis/table
+        self.update_roi_analysis()
+        
+        # Per-ROI color (cycle through HSV wheel)
+        hue = (len(self.rois) * 55) % 360
+        color = QColor.fromHsv(hue, 220, 255)
+        roi_model.color = color
+        roi_item.set_color(color)
+        
+        print(f"Created ROI: {roi_model}")
+
+    def create_spot_roi(self, center_point: QPointF, radius: float):
+        """Create a spot ROI from the image view signal.
+        
+        Args:
+            center_point (QPointF): Center point in thermal image coordinates.
+            radius (float): Radius in thermal pixels.
+        """
+        # Import here to avoid circular imports
+        from analysis.roi_models import SpotROI
+        from ui.roi_items import SpotROIItem
+        
+        # Create spot ROI model
+        spot_model = SpotROI(
+            x=center_point.x(), 
+            y=center_point.y(), 
+            radius=radius,
+            name=f"Spot_{len(self.rois)+1}"
+        )
+        spot_model.emissivity = 0.95
+        
+        # Create graphics item as child of thermal item
+        spot_item = SpotROIItem(spot_model, parent=self.image_view._thermal_item)
+        spot_item.setZValue(10)
+        
+        # Register in collections
+        self.rois.append(spot_model)
+        self.roi_items[spot_model.id] = spot_item
+        
+        # Update analysis/table
+        self.update_roi_analysis()
+        
+        # Per-ROI color (cycle through HSV wheel)
+        hue = (len(self.rois) * 55) % 360
+        color = QColor.fromHsv(hue, 220, 255)
+        spot_model.color = color
+        spot_item.set_color(color)
+        
+        print(f"Created Spot ROI: {spot_model}")
+
+    def create_polygon_roi(self, points: list):
+        """Create a polygon ROI from the image view signal.
+        
+        Args:
+            points (list): List of (x, y) coordinate tuples in thermal image space.
+        """
+        # Import here to avoid circular imports
+        from analysis.roi_models import PolygonROI
+        from ui.roi_items import PolygonROIItem
+        
+        # Create polygon ROI model
+        polygon_model = PolygonROI(
+            points=points,
+            name=f"Polygon_{len(self.rois)+1}"
+        )
+        polygon_model.emissivity = 0.95
+        
+        # Create graphics item as child of thermal item
+        polygon_item = PolygonROIItem(polygon_model, parent=self.image_view._thermal_item)
+        polygon_item.setZValue(10)
+        
+        # Register in collections
+        self.rois.append(polygon_model)
+        self.roi_items[polygon_model.id] = polygon_item
+        
+        # Update analysis/table
+        self.update_roi_analysis()
+        
+        # Per-ROI color (cycle through HSV wheel)
+        hue = (len(self.rois) * 55) % 360
+        color = QColor.fromHsv(hue, 220, 255)
+        polygon_model.color = color
+        polygon_item.set_color(color)
+        
+        print(f"Created Polygon ROI: {polygon_model}")
+
+    def on_roi_modified(self, roi_model):
+        """Handle ROI modification (move/resize) events.
+        
+        Args:
+            roi_model: The ROI model that was modified.
+        """
+        print(f"ROI modified: {roi_model.name}")
+        # Update just this single ROI instead of all ROIs for better performance
+        self.update_single_roi(roi_model)
