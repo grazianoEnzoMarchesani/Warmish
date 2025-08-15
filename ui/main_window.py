@@ -963,7 +963,6 @@ class ThermalAnalyzerNG(QMainWindow):
         self.preset_file_label = QLabel("No preset loaded")
         self.preset_file_label.setStyleSheet("color: #888; font-style: italic;")
         self.btn_load_preset = QPushButton("Load Preset JSON")
-        self.btn_load_preset.setStyleSheet("background-color: #2196F3; color: white;")
         
         preset_controls_layout.addWidget(self.preset_file_label)
         preset_controls_layout.addStretch()
@@ -973,15 +972,12 @@ class ThermalAnalyzerNG(QMainWindow):
         # Preset options
         self.cb_thermal_params = QCheckBox("Apply Thermal Parameters")
         self.cb_analysis_areas = QCheckBox("Apply Analysis Areas (ROIs)")
-        self.cb_color_palette = QCheckBox("Apply Color Palette")
         
         self.cb_thermal_params.setChecked(True)
         self.cb_analysis_areas.setChecked(True)
-        self.cb_color_palette.setChecked(True)
         
         preset_layout.addWidget(self.cb_thermal_params)
         preset_layout.addWidget(self.cb_analysis_areas)
-        preset_layout.addWidget(self.cb_color_palette)
         
         self.tab_batch_layout.addWidget(preset_group)
         
@@ -992,9 +988,7 @@ class ThermalAnalyzerNG(QMainWindow):
         # Image selection controls
         image_controls_layout = QHBoxLayout()
         self.btn_select_images = QPushButton("Select Images")
-        self.btn_select_images.setStyleSheet("background-color: #4CAF50; color: white;")
         self.btn_clear_images = QPushButton("Clear List")
-        self.btn_clear_images.setStyleSheet("background-color: #F44336; color: white;")
         
         image_controls_layout.addWidget(self.btn_select_images)
         image_controls_layout.addWidget(self.btn_clear_images)
@@ -1006,18 +1000,17 @@ class ThermalAnalyzerNG(QMainWindow):
         self.images_list = QListWidget()
         self.images_list.setMaximumHeight(120)
         self.images_list.setStyleSheet(
-            "QListWidget { border: 1px solid #ccc; background-color: #f9f9f9; }"
+            "QListWidget { border: 1px solid palette(mid); }"
             "QListWidget::item { padding: 4px; }"
-            "QListWidget::item:selected { background-color: #e3f2fd; }"
+            "QListWidget::item:selected { background-color: palette(highlight); color: palette(highlighted-text); }"
+            "QListWidget::item:hover { background-color: palette(light); }"
         )
         batch_layout.addWidget(self.images_list)
         
         # Processing controls
         process_layout = QHBoxLayout()
         self.btn_process_batch = QPushButton("Process All Images")
-        self.btn_process_batch.setStyleSheet(
-            "background-color: #a259f7; color: white; font-weight: bold;"
-        )
+
         self.btn_process_batch.setEnabled(False)  # Disabled until images and preset are loaded
         
         self.batch_progress = QProgressBar()
@@ -1046,9 +1039,7 @@ class ThermalAnalyzerNG(QMainWindow):
         export_layout.addLayout(export_format_layout)
         
         self.btn_export_current = QPushButton("Export Current Analysis")
-        self.btn_export_current.setStyleSheet(
-            "background-color: #6c47e6; color: white; font-weight: bold;"
-        )
+
         export_layout.addWidget(self.btn_export_current)
         
         self.tab_batch_layout.addWidget(export_group)
@@ -2957,7 +2948,6 @@ class ThermalAnalyzerNG(QMainWindow):
             # Update checkboxes based on available data
             self.cb_thermal_params.setEnabled(preset_info['has_thermal_params'])
             self.cb_analysis_areas.setEnabled(preset_info['has_rois'])
-            self.cb_color_palette.setEnabled(preset_info['has_palette'])
             
             # Enable processing if we have both preset and images
             self._update_process_button_state()
@@ -3120,7 +3110,7 @@ class ThermalAnalyzerNG(QMainWindow):
             f"This will apply:\n"
             f"• Thermal Parameters: {'✓' if self.cb_thermal_params.isChecked() else '✗'}\n"
             f"• Analysis Areas (ROIs): {'✓' if self.cb_analysis_areas.isChecked() else '✗'}\n"
-            f"• Color Palette: {'✓' if self.cb_color_palette.isChecked() else '✗'}",
+            f"• Color Palette: ✓ (always applied)",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes
         )
@@ -3188,7 +3178,6 @@ class ThermalAnalyzerNG(QMainWindow):
             self.btn_process_batch.setEnabled(True)
             self.btn_select_images.setEnabled(True)
             self.btn_load_preset.setEnabled(True)
-
     def _process_single_image_with_preset(self, image_path, output_dir):
         """
         Process a single image with the loaded preset.
@@ -3217,6 +3206,34 @@ class ThermalAnalyzerNG(QMainWindow):
             thermal_params = self.get_current_thermal_parameters()
             if self.thermal_engine.calculate_temperatures(thermal_params):
                 self.roi_controller.update_all_analyses()
+            
+            # CRITICAL FIX: Synchronize pixmaps from thermal_engine to main_window AND image_view
+            # This ensures that the export functions use the correct thermal and visible images
+            # for the current file, not from a previous file or preset
+
+            # Update thermal pixmap
+            thermal_pixmap = self.thermal_engine.create_colored_pixmap(
+                self.selected_palette, 
+                self.palette_inverted
+            )
+            self.base_pixmap = thermal_pixmap
+
+            # Update visible pixmap  
+            self.base_pixmap_visible = self.thermal_engine.base_pixmap_visible
+
+            # CRUCIAL: Update the image view pixmaps as well
+            # The export_overlay_image method uses these internal pixmaps!
+            if thermal_pixmap and not thermal_pixmap.isNull():
+                self.image_view.set_thermal_pixmap(thermal_pixmap)
+                
+            if self.thermal_engine.base_pixmap_visible and not self.thermal_engine.base_pixmap_visible.isNull():
+                self.image_view.set_visible_pixmap(self.thermal_engine.base_pixmap_visible)
+
+            print(f"🔄 Synchronized pixmaps for {os.path.basename(image_path)}")
+            print(f"  - Thermal pixmap: {thermal_pixmap.width() if thermal_pixmap else 0}x{thermal_pixmap.height() if thermal_pixmap else 0}")
+            print(f"  - Visible pixmap: {self.base_pixmap_visible.width() if self.base_pixmap_visible else 0}x{self.base_pixmap_visible.height() if self.base_pixmap_visible else 0}")
+            print(f"  - Image view thermal updated: {not self.image_view._thermal_item.pixmap().isNull()}")
+            print(f"  - Image view visible updated: {not self.image_view._visible_item.pixmap().isNull()}")
             
             # Generate output filename base
             image_name = os.path.splitext(os.path.basename(image_path))[0]
