@@ -46,6 +46,10 @@ class ROIController(QObject):
         
         # Default color scheme for ROIs
         self._color_hue_step = 55
+        
+        # Performance optimization: prevent spam during updates
+        self._updating_statistics = False
+        self._pending_updates = set()  # Track ROIs that need update
 
     def set_thermal_engine(self, thermal_engine):
         """
@@ -214,6 +218,7 @@ class ROIController(QObject):
         # Recalculate statistics if emissivity changed
         if 'emissivity' in kwargs:
             self._update_roi_statistics(roi)
+            self.analysis_updated.emit()  # Emit to trigger UI refresh for statistics changes
             
         self.roi_modified.emit(roi)
         return True
@@ -255,8 +260,9 @@ class ROIController(QObject):
         # Recalculate temperature statistics since geometry changed
         self._update_roi_statistics(roi)
         
-        # Emit signal to notify UI of the update
+        # Emit signals to notify UI of the update
         self.roi_modified.emit(roi)
+        self.analysis_updated.emit()  # Also emit this to trigger UI refresh
         
         print(f"✅ Updated geometry for ROI {roi.name} (ID: {roi_id})")
         return True
@@ -298,44 +304,80 @@ class ROIController(QObject):
         Args:
             roi: ROI model to update.
         """
-        if self.thermal_engine is None or self.thermal_engine.thermal_data is None:
-            # No thermal data available
+        # Prevent recursive updates or spam during batch operations
+        if self._updating_statistics:
+            self._pending_updates.add(roi.id)
+            return
+            
+        if self.thermal_engine is None:
+            print(f"⚠️ No thermal engine available for ROI {roi.name}")
             roi.temp_min = roi.temp_max = roi.temp_mean = None
             roi.temp_std = roi.temp_median = None
             return
             
+        if self.thermal_engine.thermal_data is None:
+            print(f"⚠️ No thermal data available for ROI {roi.name}")
+            roi.temp_min = roi.temp_max = roi.temp_mean = None
+            roi.temp_std = roi.temp_median = None
+            return
+            
+        self._updating_statistics = True
         try:
             # Create mask for this ROI
             roi_mask = self._create_roi_mask(roi)
-            if roi_mask is None or not np.any(roi_mask):
-                # No valid pixels in ROI
+            if roi_mask is None:
+                print(f"⚠️ Failed to create mask for ROI {roi.name}")
                 roi.temp_min = roi.temp_max = roi.temp_mean = None
                 roi.temp_std = roi.temp_median = None
-                return
                 
-            # Get temperature values for ROI
-            roi_emissivity = getattr(roi, 'emissivity', 0.95)
-            temps = self.thermal_engine.compute_roi_temperatures(roi_mask, roi_emissivity)
-            
-            if temps.size > 0:
-                valid_temps = temps[~np.isnan(temps)]
-                if valid_temps.size > 0:
-                    roi.temp_min = float(np.min(valid_temps))
-                    roi.temp_max = float(np.max(valid_temps))
-                    roi.temp_mean = float(np.mean(valid_temps))
-                    roi.temp_std = float(np.std(valid_temps))
-                    roi.temp_median = float(np.median(valid_temps))
+            elif not np.any(roi_mask):
+                print(f"⚠️ Empty mask for ROI {roi.name} - ROI might be outside image bounds")
+                roi.temp_min = roi.temp_max = roi.temp_mean = None
+                roi.temp_std = roi.temp_median = None
+                
+            else:
+                # Get temperature values for ROI
+                roi_emissivity = getattr(roi, 'emissivity', 0.95)
+                temps = self.thermal_engine.compute_roi_temperatures(roi_mask, roi_emissivity)
+                
+                if temps.size > 0:
+                    valid_temps = temps[~np.isnan(temps)]
+                    if valid_temps.size > 0:
+                        roi.temp_min = float(np.min(valid_temps))
+                        roi.temp_max = float(np.max(valid_temps))
+                        roi.temp_mean = float(np.mean(valid_temps))
+                        roi.temp_std = float(np.std(valid_temps))
+                        roi.temp_median = float(np.median(valid_temps))
+                        # Statistics updated successfully (reduced logging for performance)
+                    else:
+                        print(f"⚠️ All temperature values are NaN for ROI {roi.name}")
+                        roi.temp_min = roi.temp_max = roi.temp_mean = None
+                        roi.temp_std = roi.temp_median = None
                 else:
+                    print(f"⚠️ No temperature values computed for ROI {roi.name}")
                     roi.temp_min = roi.temp_max = roi.temp_mean = None
                     roi.temp_std = roi.temp_median = None
-            else:
-                roi.temp_min = roi.temp_max = roi.temp_mean = None
-                roi.temp_std = roi.temp_median = None
                 
         except Exception as e:
-            print(f"Error updating ROI statistics: {e}")
+            print(f"❌ Error updating ROI statistics for {roi.name}: {e}")
+            import traceback
+            traceback.print_exc()
             roi.temp_min = roi.temp_max = roi.temp_mean = None
             roi.temp_std = roi.temp_median = None
+        finally:
+            self._updating_statistics = False
+            
+            # Process any pending updates that accumulated during this calculation
+            if self._pending_updates:
+                pending_roi_ids = self._pending_updates.copy()
+                self._pending_updates.clear()
+                
+                # Schedule pending updates (debounced)
+                for pending_roi_id in pending_roi_ids:
+                    pending_roi = self.get_roi_by_id(pending_roi_id)
+                    if pending_roi and pending_roi != roi:  # Avoid immediate re-calculation of same ROI
+                        print(f"⏰ Processing deferred update for ROI {pending_roi.name}")
+                        self._update_roi_statistics(pending_roi)
 
     def _create_roi_mask(self, roi) -> Optional[np.ndarray]:
         """
@@ -360,22 +402,38 @@ class ROIController(QObject):
                 x1, y1 = max(0, int(x1)), max(0, int(y1))
                 x2, y2 = min(w, int(x2)), min(h, int(y2))
                 
+                # Check if ROI is within image bounds
+                if x1 >= w or y1 >= h or x2 <= 0 or y2 <= 0:
+                    print(f"⚠️ SpotROI {roi.name} is outside image bounds: center=({roi.x}, {roi.y}), radius={roi.radius}, image_size=({w}, {h})")
+                    return mask  # Return empty mask
+                
                 if x1 < x2 and y1 < y2:
                     y_indices, x_indices = np.ogrid[y1:y2, x1:x2]
                     circle_mask = ((x_indices - roi.x) ** 2 + (y_indices - roi.y) ** 2) <= (roi.radius ** 2)
                     mask[y1:y2, x1:x2] = circle_mask
                     
             elif isinstance(roi, PolygonROI):
-                # Polygon mask
+                # Polygon mask - optimized version using vectorized operations
                 x1, y1, x2, y2 = roi.get_bounds()
                 x1, y1 = max(0, int(x1)), max(0, int(y1))
                 x2, y2 = min(w, int(x2)), min(h, int(y2))
                 
+                # Check if ROI is within image bounds
+                if x1 >= w or y1 >= h or x2 <= 0 or y2 <= 0:
+                    print(f"⚠️ PolygonROI {roi.name} is outside image bounds: bounds=({x1}, {y1}, {x2}, {y2}), image_size=({w}, {h})")
+                    return mask  # Return empty mask
+                
                 if x1 < x2 and y1 < y2:
-                    for i in range(y1, y2):
-                        for j in range(x1, x2):
-                            if roi.contains_point(j, i):
-                                mask[i, j] = True
+                    # Create vectorized coordinate grids for the bounding box
+                    y_coords, x_coords = np.mgrid[y1:y2, x1:x2]
+                    
+                    # Vectorized ray casting algorithm for polygon
+                    mask_section = self._polygon_contains_points_vectorized(
+                        roi.points, x_coords.flatten(), y_coords.flatten()
+                    )
+                    
+                    # Reshape back to 2D and assign to mask
+                    mask[y1:y2, x1:x2] = mask_section.reshape(y2-y1, x2-x1)
                                 
             else:
                 # Rectangular mask (default)
@@ -384,14 +442,69 @@ class ROIController(QObject):
                 x2 = min(w, int(np.ceil(roi.x + roi.width)))
                 y2 = min(h, int(np.ceil(roi.y + roi.height)))
                 
+                # Check if ROI is within image bounds
+                if x1 >= w or y1 >= h or x2 <= 0 or y2 <= 0:
+                    print(f"⚠️ RectROI {roi.name} is outside image bounds: rect=({roi.x}, {roi.y}, {roi.width}, {roi.height}), image_size=({w}, {h})")
+                    return mask  # Return empty mask
+                
                 if x1 < x2 and y1 < y2:
                     mask[y1:y2, x1:x2] = True
+                    
+            pixel_count = np.sum(mask)
+            if pixel_count == 0:
+                print(f"⚠️ ROI {roi.name} mask contains no pixels after bounds checking")
+            # Reduced logging for performance - only log if pixel count is 0 or on error
                     
             return mask
             
         except Exception as e:
-            print(f"Error creating ROI mask: {e}")
+            print(f"❌ Error creating ROI mask for {roi.name}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
+
+    def _polygon_contains_points_vectorized(self, polygon_points, x_coords, y_coords):
+        """
+        Vectorized ray casting algorithm for polygon point-in-polygon test.
+        
+        Args:
+            polygon_points: List of (x, y) tuples defining polygon vertices
+            x_coords: Flattened array of x coordinates to test
+            y_coords: Flattened array of y coordinates to test
+            
+        Returns:
+            np.ndarray: Boolean array indicating which points are inside polygon
+        """
+        if len(polygon_points) < 3:
+            return np.zeros_like(x_coords, dtype=bool)
+        
+        # Convert polygon points to numpy arrays for vectorized operations
+        polygon_points = np.array(polygon_points)
+        n_vertices = len(polygon_points)
+        
+        # Initialize result array
+        inside = np.zeros_like(x_coords, dtype=bool)
+        
+        # Ray casting algorithm - vectorized version
+        j = n_vertices - 1
+        for i in range(n_vertices):
+            xi, yi = polygon_points[i]
+            xj, yj = polygon_points[j]
+            
+            # Vectorized conditions for ray casting
+            condition1 = (yi > y_coords) != (yj > y_coords)
+            
+            # Avoid division by zero when yj == yi
+            with np.errstate(divide='ignore', invalid='ignore'):
+                condition2 = x_coords < (xj - xi) * (y_coords - yi) / (yj - yi) + xi
+                # Handle division by zero case (horizontal line)
+                condition2 = np.where(yj == yi, False, condition2)
+            
+            # Update inside array where both conditions are true
+            inside = inside ^ (condition1 & condition2)
+            j = i
+            
+        return inside
 
     def _generate_roi_color(self) -> QColor:
         """

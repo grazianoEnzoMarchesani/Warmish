@@ -1,81 +1,77 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.44,
+    "Emissivity": 0.77,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5,
     "ObjectDistance": 1.0,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "Ice",
-  "palette_inverted": true,
+  "palette": "Iron",
+  "palette_inverted": false,
   "temp_range_settings": {
-    "mode": "autorange",
-    "manual_min": 20.0,
-    "manual_max": 40.0
+    "mode": "manual",
+    "manual_min": 33.0,
+    "manual_max": 64.0
   },
   "overlay_settings": {
     "scale": 0.7405293836351845,
-    "offset_x": -10,
-    "offset_y": -27,
-    "opacity": 100,
+    "offset_x": -10.0,
+    "offset_y": -27.0,
+    "opacity": 73,
     "blend_mode": "Normal"
   },
   "roi_label_settings": {
     "name": true,
     "emissivity": true,
     "min": false,
-    "max": true,
-    "avg": true,
-    "median": false
+    "max": false,
+    "avg": false,
+    "median": true
   },
   "rois": [
     {
-      "type": "RectROI",
-      "name": "ROI_1",
+      "type": "SpotROI",
+      "name": "Spot_1",
       "emissivity": 0.1,
-      "x": 39.0,
-      "y": 131.0,
-      "width": 62.75057802105913,
-      "height": 75.58592352536667
+      "x": 82.1798365122616,
+      "y": 168.39237057220708,
+      "radius": 28.31062670299727
     },
     {
-      "type": "SpotROI",
-      "name": "Spot_2",
-      "emissivity": 0.001,
-      "x": 254.2046298242317,
-      "y": 183.4515263937637,
-      "radius": 21.537953795379508
-    },
-    {
-      "type": "SpotROI",
-      "name": "Spot_3",
-      "emissivity": 0.3,
-      "x": 202.25117041499342,
-      "y": 82.42783365140573,
-      "radius": 42.04359673024524
+      "type": "RectROI",
+      "name": "ROI_2",
+      "emissivity": 0.4,
+      "x": 185.0,
+      "y": 108.0,
+      "width": 99.40054495912807,
+      "height": 119.67302452316075
     },
     {
       "type": "PolygonROI",
-      "name": "Polygon_4",
-      "emissivity": 0.95,
+      "name": "Polygon_3",
+      "emissivity": 0.56,
       "points": [
         [
-          122.44585109874741,
-          201.54951718088938
+          16.130790190735695,
+          14.71389645776567
         ],
         [
-          215.8586433800968,
-          181.58342417418874
+          97.22070844686648,
+          16.02179836512262
         ],
         [
-          175.21338261645622,
-          165.18270491868466
+          67.79291553133515,
+          68.33787465940054
         ],
         [
-          122.44585109874741,
-          201.54951718088938
+          24.63215258855587,
+          74.22343324250681
+        ],
+        [
+          14.822888283378745,
+          53.29700272479565
         ]
       ]
     }

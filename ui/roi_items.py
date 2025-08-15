@@ -51,6 +51,9 @@ class RectROIItem(QGraphicsRectItem):
         self.setPos(model.x, model.y)
         self._press_parent_pos = QPointF()
         
+        # Movement state tracking for optimization
+        self._is_moving = False  # Track if the entire ROI is being moved
+        
         # Enhanced visual feedback
         self._show_handles = False
         self._hovered_handle = None
@@ -181,12 +184,16 @@ class RectROIItem(QGraphicsRectItem):
             self.model.x = new_pos.x()
             self.model.y = new_pos.y()
             
-            # Notify about ROI modification (get the view from scene)
-            view_list = self.scene().views()
-            if view_list:
-                view = view_list[0]
-                if hasattr(view, "notify_roi_modified"):
-                    view.notify_roi_modified(self.model)
+            # Only notify about ROI modification if we're not currently moving
+            # This prevents continuous temperature calculations during drag
+            # Add safety check for _is_moving attribute
+            is_moving = getattr(self, '_is_moving', False)
+            if not is_moving:
+                view_list = self.scene().views()
+                if view_list:
+                    view = view_list[0]
+                    if hasattr(view, "notify_roi_modified"):
+                        view.notify_roi_modified(self.model)
         
         return super().itemChange(change, value)
     def update_from_model(self):
@@ -369,6 +376,9 @@ class RectROIItem(QGraphicsRectItem):
                 self.prepareGeometryChange()
                 event.accept()
                 return
+            else:
+                # Starting to move the entire ROI
+                self._is_moving = True
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -453,8 +463,10 @@ class RectROIItem(QGraphicsRectItem):
             self.update()
             event.accept()
             return
-        # If it was a simple move, recalculate here
-        if event.button() == Qt.LeftButton:
+        # Handle end of ROI movement
+        if event.button() == Qt.LeftButton and self._is_moving:
+            self._is_moving = False
+            # Now trigger temperature recalculation after movement is complete
             self._notify_model_changed()
         super().mouseReleaseEvent(event)
 
@@ -598,6 +610,9 @@ class SpotROIItem(QGraphicsEllipseItem):
         self.setPos(model.x, model.y)
         self._press_parent_pos = QPointF()
         
+        # Movement state tracking for optimization
+        self._is_moving = False  # Track if the entire ROI is being moved
+        
         # Enhanced visual feedback
         self._show_handles = False
         self._hovered_handle = None
@@ -684,19 +699,26 @@ class SpotROIItem(QGraphicsEllipseItem):
     
     def _show_hide_handles(self, show: bool):
         """Show or hide handles."""
-        if show and not self._handle_items:
-            self._create_handle_items()
+        # Add safety check for _handle_items attribute
+        handle_items = getattr(self, '_handle_items', {})
         
-        if self._handle_items:
-            for handle_item in self._handle_items.values():
+        if show and not handle_items:
+            if hasattr(self, '_create_handle_items'):
+                self._create_handle_items()
+                handle_items = getattr(self, '_handle_items', {})
+        
+        if handle_items:
+            for handle_item in handle_items.values():
                 handle_item.setVisible(show)
     
     def _highlight_handle(self, handle_key: str = None):
         """Highlight a specific handle or remove highlighting."""
-        if not self._handle_items:
+        # Add safety check for _handle_items attribute
+        handle_items = getattr(self, '_handle_items', {})
+        if not handle_items:
             return
             
-        for key, handle_item in self._handle_items.items():
+        for key, handle_item in handle_items.items():
             if key == handle_key:
                 # Highlight this handle
                 highlight_brush = QBrush(QColor(255, 150, 0, 220))  # Bright orange
@@ -722,6 +744,17 @@ class SpotROIItem(QGraphicsEllipseItem):
             new_position = value
             self.model.x = float(new_position.x())
             self.model.y = float(new_position.y())
+            
+            # Only notify about ROI modification if we're not currently moving
+            # This prevents continuous temperature calculations during drag
+            # Add safety check for _is_moving attribute
+            is_moving = getattr(self, '_is_moving', False)
+            if not is_moving:
+                view_list = self.scene().views()
+                if view_list:
+                    view = view_list[0]
+                    if hasattr(view, "notify_roi_modified"):
+                        view.notify_roi_modified(self.model)
         
         # Call parent implementation
         return super().itemChange(change, value)
@@ -791,12 +824,30 @@ class SpotROIItem(QGraphicsEllipseItem):
 
     def hoverEnterEvent(self, event):
         """Handle mouse enter event in ROI area."""
+        # Ensure attributes exist (backward compatibility)
+        if not hasattr(self, '_show_handles'):
+            self._show_handles = False
+        if not hasattr(self, '_handle_items'):
+            self._handle_items = {}
+        if not hasattr(self, '_hovered_handle'):
+            self._hovered_handle = None
+        if not hasattr(self, '_is_moving'):
+            self._is_moving = False
+            
         self._show_handles = True
         self._show_hide_handles(True)
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
         """Handle mouse leave event from ROI area."""
+        # Ensure attributes exist (backward compatibility)
+        if not hasattr(self, '_show_handles'):
+            self._show_handles = False
+        if not hasattr(self, '_handle_items'):
+            self._handle_items = {}
+        if not hasattr(self, '_hovered_handle'):
+            self._hovered_handle = None
+            
         self._show_handles = False
         self._show_hide_handles(False)
         self._hovered_handle = None
@@ -815,7 +866,9 @@ class SpotROIItem(QGraphicsEllipseItem):
         self.setCursor(QCursor(cursors[h]))
         
         # Highlight the handle under the mouse
-        if h != self._hovered_handle:
+        # Add safety check for _hovered_handle attribute
+        current_hovered = getattr(self, '_hovered_handle', None)
+        if h != current_hovered:
             self._hovered_handle = h
             self._highlight_handle(h)
         
@@ -828,6 +881,10 @@ class SpotROIItem(QGraphicsEllipseItem):
         Args:
             event: Mouse press event containing button and position information
         """
+        # Ensure attributes exist (backward compatibility)
+        if not hasattr(self, '_is_moving'):
+            self._is_moving = False
+            
         if event.button() == Qt.LeftButton:
             h = self._handle_at(event.pos())
             if h:  # Start resize operation
@@ -840,6 +897,9 @@ class SpotROIItem(QGraphicsEllipseItem):
                 self.prepareGeometryChange()
                 event.accept()
                 return
+            else:
+                # Starting to move the entire ROI
+                self._is_moving = True
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -906,8 +966,12 @@ class SpotROIItem(QGraphicsEllipseItem):
             self.update()
             event.accept()
             return
-        # If it was a simple move, recalculate here
-        if event.button() == Qt.LeftButton:
+        # Handle end of ROI movement
+        # Add safety check for _is_moving attribute
+        is_moving = getattr(self, '_is_moving', False)
+        if event.button() == Qt.LeftButton and is_moving:
+            self._is_moving = False
+            # Now trigger temperature recalculation after movement is complete
             self._notify_model_changed()
         super().mouseReleaseEvent(event)
 
