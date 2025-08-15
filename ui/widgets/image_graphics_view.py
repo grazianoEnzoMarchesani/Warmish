@@ -795,9 +795,8 @@ class ImageGraphicsView(QGraphicsView):
         Args:
             points (list): List of (x, y) coordinate tuples in thermal image space.
         """
-        # Close polygon if necessary
-        if points[0] != points[-1]:
-            points.append(points[0])
+        # No need to close polygon - Qt handles this automatically
+        # Remove automatic duplication of first point that causes overlapping vertices
         
         # Emit signal with thermal image coordinates
         self.polygon_roi_drawn.emit(points)

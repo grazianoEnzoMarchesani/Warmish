@@ -332,7 +332,7 @@ class ThermalAnalyzerNG(QMainWindow):
             roi_item.setZValue(10)
             
             # Register in UI collection
-            self.roi_items[roi_model.id] = roi_item
+            self.roi_items[str(roi_model.id)] = roi_item
             
             # Update table
             self.update_roi_table()
@@ -1753,8 +1753,8 @@ class ThermalAnalyzerNG(QMainWindow):
         
         if current_row >= 0 and current_row < len(all_rois):
             roi = all_rois[current_row]
-            if roi.id in self.roi_items:
-                roi_item = self.roi_items[roi.id]
+            if str(roi.id) in self.roi_items:
+                roi_item = self.roi_items[str(roi.id)]
                 
                 # Clear other selections
                 for item in self.image_view._scene.selectedItems():
@@ -1815,7 +1815,7 @@ class ThermalAnalyzerNG(QMainWindow):
                                   "Please enter a valid number for emissivity")
                                   
         # Refresh the visual label on the ROI item
-        item_view = self.roi_items.get(roi.id)
+        item_view = self.roi_items.get(str(roi.id))
         if item_view and hasattr(item_view, "refresh_label"):
             item_view.refresh_label()
 
@@ -2859,7 +2859,7 @@ class ThermalAnalyzerNG(QMainWindow):
         
         # Refresh all ROI labels
         for roi_model in self.roi_controller.get_all_rois():
-            item = self.roi_items.get(roi_model.id)
+            item = self.roi_items.get(str(roi_model.id))
             if item and hasattr(item, "refresh_label"):
                 item.refresh_label()
         

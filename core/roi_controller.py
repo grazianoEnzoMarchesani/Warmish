@@ -146,12 +146,12 @@ class ROIController(QObject):
         self.roi_added.emit(roi_model)
         return roi_model
 
-    def delete_roi(self, roi_id: str) -> bool:
+    def delete_roi(self, roi_id: Any) -> bool:
         """
         Delete an ROI by its ID.
         
         Args:
-            roi_id (str): ID of the ROI to delete.
+            roi_id (Any): ID of the ROI to delete (UUID object).
             
         Returns:
             bool: True if deletion was successful, False otherwise.
@@ -159,17 +159,17 @@ class ROIController(QObject):
         for i, roi in enumerate(self.rois):
             if roi.id == roi_id:
                 removed_roi = self.rois.pop(i)
-                self.roi_removed.emit(roi_id)
+                self.roi_removed.emit(str(roi_id))
                 print(f"Deleted ROI: {removed_roi.name}")
                 return True
         return False
 
-    def delete_rois(self, roi_ids: List[str]) -> int:
+    def delete_rois(self, roi_ids: List[Any]) -> int:
         """
         Delete multiple ROIs by their IDs.
         
         Args:
-            roi_ids (List[str]): List of ROI IDs to delete.
+            roi_ids (List[Any]): List of ROI IDs to delete (UUID objects).
             
         Returns:
             int: Number of ROIs successfully deleted.

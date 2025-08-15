@@ -11,14 +11,14 @@
   "palette": "Iron",
   "palette_inverted": false,
   "temp_range_settings": {
-    "mode": "manual",
-    "manual_min": 33.0,
-    "manual_max": 64.0
+    "mode": "autorange",
+    "manual_min": 0.0,
+    "manual_max": 100.0
   },
   "overlay_settings": {
     "scale": 0.7405293836351845,
-    "offset_x": -10.0,
-    "offset_y": -27.0,
+    "offset_x": -10,
+    "offset_y": -27,
     "opacity": 73,
     "blend_mode": "Normal"
   },
@@ -26,54 +26,9 @@
     "name": true,
     "emissivity": true,
     "min": false,
-    "max": false,
-    "avg": false,
-    "median": true
+    "max": true,
+    "avg": true,
+    "median": false
   },
-  "rois": [
-    {
-      "type": "SpotROI",
-      "name": "Spot_1",
-      "emissivity": 0.1,
-      "x": 82.1798365122616,
-      "y": 168.39237057220708,
-      "radius": 28.31062670299727
-    },
-    {
-      "type": "RectROI",
-      "name": "ROI_2",
-      "emissivity": 0.4,
-      "x": 185.0,
-      "y": 108.0,
-      "width": 99.40054495912807,
-      "height": 119.67302452316075
-    },
-    {
-      "type": "PolygonROI",
-      "name": "Polygon_3",
-      "emissivity": 0.56,
-      "points": [
-        [
-          16.130790190735695,
-          14.71389645776567
-        ],
-        [
-          97.22070844686648,
-          16.02179836512262
-        ],
-        [
-          67.79291553133515,
-          68.33787465940054
-        ],
-        [
-          24.63215258855587,
-          74.22343324250681
-        ],
-        [
-          14.822888283378745,
-          53.29700272479565
-        ]
-      ]
-    }
-  ]
+  "rois": []
 }
