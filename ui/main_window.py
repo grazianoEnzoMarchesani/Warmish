@@ -17,12 +17,12 @@ import numpy as np
 import matplotlib.cm as cm
 
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QLineEdit, QPushButton, QLabel, QTextEdit, QTabWidget,
     QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QCheckBox, QFileDialog, QMessageBox, QSlider, QSpinBox,
     QDoubleSpinBox, QComboBox, QApplication, QToolBar, QListWidget,
-    QProgressBar, QListWidgetItem
+    QProgressBar, QListWidgetItem, QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, QPointF, QRectF, QSignalBlocker
 from PySide6.QtGui import QPixmap, QPainter, QAction, QKeySequence
@@ -789,87 +789,422 @@ class ThermalAnalyzerNG(QMainWindow):
         """Setup the thermal parameters configuration tab."""
         self.tab_params = QWidget()
         self.tab_params_layout = QVBoxLayout(self.tab_params)
-        self.tab_params_layout.setContentsMargins(16, 16, 16, 16)
-        self.tab_params_layout.setSpacing(12)
+        self.tab_params_layout.setContentsMargins(20, 20, 20, 20)
+        self.tab_params_layout.setSpacing(16)
         
-        # Parameters group
+        # Create a scroll area for all content
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(20)
+        
+        # === THERMAL CALCULATION PARAMETERS SECTION ===
+        self._setup_calculation_parameters_section(scroll_layout)
+        
+        # === COLOR VISUALIZATION SECTION ===
+        self._setup_color_visualization_section(scroll_layout)
+        
+        # === METADATA INFORMATION SECTION ===
+        self._setup_metadata_section(scroll_layout)
+        
+        # Add stretch to push everything to the top
+        scroll_layout.addStretch()
+        
+        scroll_area.setWidget(scroll_content)
+        self.tab_params_layout.addWidget(scroll_area)
+        
+        self.sidebar_tabs.addTab(self.tab_params, "Parameters")
+    
+    def _setup_calculation_parameters_section(self, parent_layout):
+        """Setup the thermal calculation parameters section with improved hierarchy."""
+        # Main calculation parameters group
         self.params_groupbox = QGroupBox("Calculation Parameters")
-        self.params_layout = QFormLayout(self.params_groupbox)
+        self.params_groupbox.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        params_main_layout = QVBoxLayout(self.params_groupbox)
+        params_main_layout.setContentsMargins(16, 20, 16, 16)
+        params_main_layout.setSpacing(16)
+        
+        # Primary parameters (most commonly used)
+        primary_group = QGroupBox("Primary Parameters")
+        primary_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        primary_layout = QFormLayout(primary_group)
+        primary_layout.setContentsMargins(12, 16, 12, 12)
+        primary_layout.setVerticalSpacing(10)
+        primary_layout.setHorizontalSpacing(12)
+        
+        # Advanced parameters (less commonly modified)
+        advanced_group = QGroupBox("Advanced Parameters")
+        advanced_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        advanced_layout = QFormLayout(advanced_group)
+        advanced_layout.setContentsMargins(12, 16, 12, 12)
+        advanced_layout.setVerticalSpacing(8)
+        advanced_layout.setHorizontalSpacing(12)
+        
+        # Initialize param_inputs dictionary
         self.param_inputs = {}
         
-        # Create input fields for thermal calculation parameters
-        param_keys = [
-            "Emissivity", "ObjectDistance", "ReflectedApparentTemperature", 
-            "PlanckR1", "PlanckR2", "PlanckB", "PlanckF", "PlanckO", 
-            "AtmosphericTemperature", "AtmosphericTransmission", "RelativeHumidity"
+        # Primary parameters - most commonly adjusted
+        primary_params = [
+            ("Emissivity", "Material emissivity (0.1-1.0)"),
+            ("ObjectDistance", "Distance to object (meters)"),
+            ("ReflectedApparentTemperature", "Reflected temperature (°C)")
         ]
         
-        for key in param_keys:
+        for key, tooltip in primary_params:
             line_edit = QLineEdit()
-            line_edit.editingFinished.connect(self.recalculate_and_update_view)  
+            line_edit.setStyleSheet("""
+                QLineEdit {
+                    padding: 6px 8px;
+                    border: 1px solid palette(mid);
+                    border-radius: 4px;
+                    font-size: 11px;
+                }
+                QLineEdit:focus {
+                    border: 2px solid palette(highlight);
+                }
+            """)
+            line_edit.setToolTip(tooltip)
+            line_edit.editingFinished.connect(self.recalculate_and_update_view)
             self.param_inputs[key] = line_edit
-            self.params_layout.addRow(key, self.param_inputs[key])
+            primary_layout.addRow(key.replace("ReflectedApparentTemperature", "Reflected Temp."), line_edit)
         
-        # Reset button
+        # Advanced parameters - Planck constants and atmospheric
+        advanced_params = [
+            ("PlanckR1", "Planck constant R1"),
+            ("PlanckR2", "Planck constant R2"),
+            ("PlanckB", "Planck constant B"),
+            ("PlanckF", "Planck constant F"),
+            ("PlanckO", "Planck constant O"),
+            ("AtmosphericTemperature", "Atmospheric temperature (°C)"),
+            ("AtmosphericTransmission", "Atmospheric transmission (0-1)"),
+            ("RelativeHumidity", "Relative humidity (0-1)")
+        ]
+        
+        for key, tooltip in advanced_params:
+            line_edit = QLineEdit()
+            line_edit.setStyleSheet("""
+                QLineEdit {
+                    padding: 5px 6px;
+                    border: 1px solid palette(mid);
+                    border-radius: 3px;
+                    font-size: 10px;
+                }
+                QLineEdit:focus {
+                    border: 2px solid palette(highlight);
+                }
+            """)
+            line_edit.setToolTip(tooltip)
+            line_edit.editingFinished.connect(self.recalculate_and_update_view)
+            self.param_inputs[key] = line_edit
+            
+            # Shorter labels for advanced parameters
+            label_map = {
+                "AtmosphericTemperature": "Atmospheric Temp.",
+                "AtmosphericTransmission": "Atmospheric Trans.",
+                "RelativeHumidity": "Relative Humidity"
+            }
+            display_label = label_map.get(key, key)
+            advanced_layout.addRow(display_label, line_edit)
+        
+        # Reset button with better styling
+        reset_button_container = QWidget()
+        reset_button_layout = QHBoxLayout(reset_button_container)
+        reset_button_layout.setContentsMargins(0, 8, 0, 0)
+        
         self.reset_params_button = QPushButton("Reset to EXIF Values")
+        self.reset_params_button.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+            QPushButton:pressed {
+                background-color: #a93226;
+            }
+        """)
         self.reset_params_button.setToolTip(
             "Restore all parameters to values extracted from EXIF metadata\n" +
             "Use default values for unavailable parameters"
         )
         self.reset_params_button.clicked.connect(self.reset_params_to_exif)
-        self.params_layout.addRow("", self.reset_params_button)
         
-        self.tab_params_layout.addWidget(self.params_groupbox)
+        reset_button_layout.addStretch()
+        reset_button_layout.addWidget(self.reset_params_button)
+        reset_button_layout.addStretch()
         
-        # Palette selection group
-        self.palette_groupbox = QGroupBox("Color Palette")
-        self.palette_layout = QFormLayout(self.palette_groupbox)
+        # Assemble the calculation parameters section
+        params_main_layout.addWidget(primary_group)
+        params_main_layout.addWidget(advanced_group)
+        params_main_layout.addWidget(reset_button_container)
+        
+        parent_layout.addWidget(self.params_groupbox)
+    
+    def _setup_color_visualization_section(self, parent_layout):
+        """Setup the color palette and visualization controls section."""
+        self.palette_groupbox = QGroupBox("Color Visualization")
+        self.palette_groupbox.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        palette_main_layout = QVBoxLayout(self.palette_groupbox)
+        palette_main_layout.setContentsMargins(16, 20, 16, 16)
+        palette_main_layout.setSpacing(16)
+        
+        # Palette selection section
+        palette_selection_widget = QWidget()
+        palette_selection_widget.setStyleSheet("""
+            QWidget {
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                padding: 8px;
+            }
+        """)
+        palette_selection_layout = QFormLayout(palette_selection_widget)
+        palette_selection_layout.setContentsMargins(12, 12, 12, 12)
+        palette_selection_layout.setVerticalSpacing(12)
         
         # Palette combo box
         self.palette_combo = QComboBox()
         palette_names = list(PALETTE_MAP.keys())
         self.palette_combo.addItems(palette_names)
-        self.palette_combo.setCurrentText("Iron")  # Set default
-        self.palette_layout.addRow("Palette:", self.palette_combo)
+        self.palette_combo.setCurrentText("Iron")
+        self.palette_combo.setStyleSheet("""
+            QComboBox {
+                padding: 6px 8px;
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                font-size: 11px;
+                min-width: 120px;
+            }
+            QComboBox:focus {
+                border: 2px solid palette(highlight);
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid palette(text);
+                margin-right: 5px;
+            }
+        """)
+        palette_selection_layout.addRow("Palette:", self.palette_combo)
         
         # Palette invert button
         self.invert_palette_button = QPushButton("Invert Palette")
         self.invert_palette_button.setCheckable(True)
+        self.invert_palette_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f39c12;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 10px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #e67e22;
+            }
+            QPushButton:checked {
+                background-color: #d35400;
+            }
+            QPushButton:pressed {
+                background-color: #ba4a00;
+            }
+        """)
         self.invert_palette_button.clicked.connect(self.on_invert_palette)
-        self.palette_layout.addRow("", self.invert_palette_button)
+        palette_selection_layout.addRow("", self.invert_palette_button)
         
-        # Temperature range settings
+        # Temperature range section
+        range_control_widget = QWidget()
+        range_control_widget.setStyleSheet("""
+            QWidget {
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                padding: 8px;
+            }
+        """)
+        range_control_layout = QVBoxLayout(range_control_widget)
+        range_control_layout.setContentsMargins(12, 12, 12, 12)
+        range_control_layout.setSpacing(12)
+        
+        # Range mode selection
+        range_mode_container = QWidget()
+        range_mode_layout = QFormLayout(range_mode_container)
+        range_mode_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.range_mode_combo = QComboBox()
         self.range_mode_combo.addItems(["autorange", "manual"])
         self.range_mode_combo.setCurrentText("autorange")
+        self.range_mode_combo.setStyleSheet("""
+            QComboBox {
+                padding: 6px 8px;
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                font-size: 11px;
+                min-width: 100px;
+            }
+            QComboBox:focus {
+                border: 2px solid palette(highlight);
+            }
+        """)
         self.range_mode_combo.currentTextChanged.connect(self.on_range_mode_changed)
-        self.palette_layout.addRow("Range Mode:", self.range_mode_combo)
+        range_mode_layout.addRow("Range Mode:", self.range_mode_combo)
+        
+        range_control_layout.addWidget(range_mode_container)
         
         # Manual range controls
         self.manual_range_widget = QWidget()
-        self.manual_range_layout = QHBoxLayout(self.manual_range_widget)
-        self.manual_range_layout.setContentsMargins(0, 0, 0, 0)
+        self.manual_range_widget.setStyleSheet("""
+            QWidget {
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                padding: 8px;
+            }
+        """)
+        manual_range_main_layout = QVBoxLayout(self.manual_range_widget)
+        manual_range_main_layout.setContentsMargins(8, 8, 8, 8)
+        manual_range_main_layout.setSpacing(8)
         
+        # Manual range title
+        manual_range_title = QLabel("Manual Range")
+        manual_range_title.setStyleSheet("""
+            QLabel {
+                font-weight: bold;
+                font-size: 10px;
+                margin-bottom: 4px;
+            }
+        """)
+        manual_range_main_layout.addWidget(manual_range_title)
+        
+        # Min/Max controls in a grid-like layout
+        self.manual_range_layout = QGridLayout()
+        self.manual_range_layout.setContentsMargins(0, 0, 0, 0)
+        self.manual_range_layout.setSpacing(8)
+        
+        # Min temperature
+        min_label = QLabel("Min:")
+        min_label.setStyleSheet("font-size: 10px; font-weight: bold;")
         self.temp_min_spin = QDoubleSpinBox()
         self.temp_min_spin.setRange(-273.15, 1000.0)
         self.temp_min_spin.setDecimals(2)
         self.temp_min_spin.setSuffix(" °C")
         self.temp_min_spin.setValue(0.0)
+        self.temp_min_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                padding: 4px 6px;
+                border: 1px solid palette(mid);
+                border-radius: 3px;
+                font-size: 10px;
+            }
+            QDoubleSpinBox:focus {
+                border: 2px solid palette(highlight);
+            }
+        """)
         self.temp_min_spin.valueChanged.connect(self.on_manual_range_changed)
         
+        # Max temperature
+        max_label = QLabel("Max:")
+        max_label.setStyleSheet("font-size: 10px; font-weight: bold;")
         self.temp_max_spin = QDoubleSpinBox()
         self.temp_max_spin.setRange(-273.15, 1000.0)
         self.temp_max_spin.setDecimals(2)
         self.temp_max_spin.setSuffix(" °C")
         self.temp_max_spin.setValue(100.0)
+        self.temp_max_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                padding: 4px 6px;
+                border: 1px solid palette(mid);
+                border-radius: 3px;
+                font-size: 10px;
+            }
+            QDoubleSpinBox:focus {
+                border: 2px solid palette(highlight);
+            }
+        """)
         self.temp_max_spin.valueChanged.connect(self.on_manual_range_changed)
         
-        self.manual_range_layout.addWidget(QLabel("Min:"))
-        self.manual_range_layout.addWidget(self.temp_min_spin)
-        self.manual_range_layout.addWidget(QLabel("Max:"))
-        self.manual_range_layout.addWidget(self.temp_max_spin)
+        # Add to grid layout
+        self.manual_range_layout.addWidget(min_label, 0, 0)
+        self.manual_range_layout.addWidget(self.temp_min_spin, 0, 1)
+        self.manual_range_layout.addWidget(max_label, 1, 0)
+        self.manual_range_layout.addWidget(self.temp_max_spin, 1, 1)
         
-        self.palette_layout.addRow("Manual Range:", self.manual_range_widget)
+        manual_range_main_layout.addLayout(self.manual_range_layout)
+        range_control_layout.addWidget(self.manual_range_widget)
         
         # Initially disable manual range controls
         self.manual_range_widget.setEnabled(False)
@@ -879,14 +1214,67 @@ class ThermalAnalyzerNG(QMainWindow):
         self.manual_temp_min = 0.0
         self.manual_temp_max = 100.0
         
-        self.tab_params_layout.addWidget(self.palette_groupbox)
+        # Assemble the color visualization section
+        palette_main_layout.addWidget(palette_selection_widget)
+        palette_main_layout.addWidget(range_control_widget)
         
-        # Metadata display
+        parent_layout.addWidget(self.palette_groupbox)
+    
+    def _setup_metadata_section(self, parent_layout):
+        """Setup the metadata information section."""
+        metadata_groupbox = QGroupBox("Extracted Metadata")
+        metadata_groupbox.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        metadata_layout = QVBoxLayout(metadata_groupbox)
+        metadata_layout.setContentsMargins(16, 20, 16, 16)
+        
+        # Metadata display with improved styling
         self.all_meta_display = QTextEdit("All extracted metadata will appear here.")
         self.all_meta_display.setReadOnly(True)
-        self.tab_params_layout.addWidget(self.all_meta_display)
+        self.all_meta_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #2c3e50;
+                color: #ecf0f1;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                padding: 12px;
+                font-family: 'Courier New', monospace;
+                font-size: 10px;
+                line-height: 1.4;
+            }
+            QScrollBar:vertical {
+                background-color: #34495e;
+                width: 12px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #7f8c8d;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #95a5a6;
+            }
+        """)
+        self.all_meta_display.setMinimumHeight(200)
+        self.all_meta_display.setMaximumHeight(300)
         
-        self.sidebar_tabs.addTab(self.tab_params, "Parameters")
+        metadata_layout.addWidget(self.all_meta_display)
+        parent_layout.addWidget(metadata_groupbox)
         
     def _setup_roi_analysis_tab(self):
         """Setup the ROI (Region of Interest) analysis tab."""

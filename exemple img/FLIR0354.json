@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.2,
+    "Emissivity": 0.1,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5,
@@ -11,9 +11,9 @@
   "palette": "Plasma",
   "palette_inverted": true,
   "temp_range_settings": {
-    "mode": "manual",
-    "manual_min": 22.0,
-    "manual_max": 120.0
+    "mode": "autorange",
+    "manual_min": 0.0,
+    "manual_max": 100.0
   },
   "overlay_settings": {
     "scale": 0.7405293836351845,
@@ -46,16 +46,16 @@
       "emissivity": 0.95,
       "points": [
         [
-          213.62397820163486,
-          125.88555858310627
+          200.54495912806536,
+          142.8882833787466
         ],
         [
-          310.408719346049,
-          97.76566757493188
+          297.3297002724795,
+          114.7683923705722
         ],
         [
-          310.408719346049,
-          187.35694822888283
+          297.3297002724795,
+          204.35967302452315
         ]
       ]
     },
@@ -63,9 +63,9 @@
       "type": "SpotROI",
       "name": "fffffff",
       "emissivity": 0.95,
-      "x": 72.37057220708446,
+      "x": 46.2125340599455,
       "y": 208.93732970027247,
-      "radius": 13.26975476839236
+      "radius": 36.15803814713895
     }
   ]
 }
