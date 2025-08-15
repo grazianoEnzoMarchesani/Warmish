@@ -610,24 +610,6 @@ class ThermalAnalyzerNG(QMainWindow):
         
         toolbar.addSeparator()
         
-        # ROI tools
-        rect_roi_action = QAction('⬜ Rectangle', self)
-        rect_roi_action.setStatusTip('Create rectangular ROI')
-        rect_roi_action.triggered.connect(self.activate_rect_tool)
-        toolbar.addAction(rect_roi_action)
-        
-        spot_roi_action = QAction('🎯 Spot', self)
-        spot_roi_action.setStatusTip('Create spot ROI')
-        spot_roi_action.triggered.connect(self.activate_spot_tool)
-        toolbar.addAction(spot_roi_action)
-        
-        polygon_roi_action = QAction('🔶 Polygon', self)
-        polygon_roi_action.setStatusTip('Create polygon ROI')
-        polygon_roi_action.triggered.connect(self.activate_polygon_tool)
-        toolbar.addAction(polygon_roi_action)
-        
-        toolbar.addSeparator()
-        
         # Overlay toggle
         overlay_toggle_action = QAction('🔄 Overlay', self)
         overlay_toggle_action.setCheckable(True)

@@ -77,7 +77,7 @@ class ROIController(QObject):
             RectROI: The created ROI model.
         """
         if name is None:
-            name = f"ROI_{self._next_roi_id}"
+            name = f"Rectangle_{self._next_roi_id}"
             self._next_roi_id += 1
             
         roi_model = RectROI(x=x, y=y, width=width, height=height, name=name)
@@ -563,7 +563,7 @@ class ROIController(QObject):
         for roi_data in roi_data_list:
             try:
                 roi_type = roi_data.get("type", "")
-                roi_name = roi_data.get("name", f"ROI_{self._next_roi_id}")
+                roi_name = roi_data.get("name", f"Rectangle_{self._next_roi_id}")
                 roi_emissivity = roi_data.get("emissivity", 0.95)
                 
                 if roi_type == "RectROI":
