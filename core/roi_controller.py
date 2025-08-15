@@ -218,6 +218,49 @@ class ROIController(QObject):
         self.roi_modified.emit(roi)
         return True
 
+    def update_roi_geometry(self, roi_id: str, geometry_data: dict) -> bool:
+        """
+        Update an ROI's geometry and recalculate statistics.
+        
+        This method is specifically designed to handle geometry updates from
+        the UI (when ROIs are moved, resized, etc.) and ensures that temperature
+        statistics are recalculated based on the new geometry.
+        
+        Args:
+            roi_id (str): ID of the ROI to update.
+            geometry_data (dict): Dictionary containing geometry data:
+                - For RectROI: x, y, width, height
+                - For SpotROI: x, y, radius  
+                - For PolygonROI: points
+                
+        Returns:
+            bool: True if update was successful, False otherwise.
+        """
+        roi = self.get_roi_by_id(roi_id)
+        if roi is None:
+            print(f"❌ ROI {roi_id} not found for geometry update")
+            return False
+            
+        # Update geometry properties
+        geometry_updated = False
+        for key, value in geometry_data.items():
+            if hasattr(roi, key):
+                setattr(roi, key, value)
+                geometry_updated = True
+                
+        if not geometry_updated:
+            print(f"⚠️ No geometry properties updated for ROI {roi_id}")
+            return False
+            
+        # Recalculate temperature statistics since geometry changed
+        self._update_roi_statistics(roi)
+        
+        # Emit signal to notify UI of the update
+        self.roi_modified.emit(roi)
+        
+        print(f"✅ Updated geometry for ROI {roi.name} (ID: {roi_id})")
+        return True
+
     def get_roi_by_id(self, roi_id: str) -> Optional[Any]:
         """
         Get an ROI by its ID.

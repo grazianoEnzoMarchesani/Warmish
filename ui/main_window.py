@@ -1128,10 +1128,7 @@ class ThermalAnalyzerNG(QMainWindow):
         
     def _init_data_storage(self):
         """Initialize data storage variables."""
-        # Thermal data storage
-        self.thermal_data = None
-        self.temperature_data = None
-        self.metadata = None
+        # Note: Thermal data is now managed by ThermalEngine
         self.base_pixmap = None
         self.base_pixmap_visible = None
         
@@ -1231,77 +1228,11 @@ class ThermalAnalyzerNG(QMainWindow):
             if hasattr(self, 'settings_manager'):
                 self.settings_manager.set_auto_save_enabled(True)
 
-    def _get_float_param(self, param_name, default_value):
-        """
-        Get a float parameter from UI input or metadata with fallback.
-        
-        This helper method safely extracts numeric parameters from either
-        the UI input fields or the metadata, handling "N/A" values and
-        conversion errors gracefully.
-        
-        Args:
-            param_name (str): Name of the parameter to retrieve.
-            default_value (float): Default value if parameter is unavailable.
-            
-        Returns:
-            float: The parameter value or default if unavailable.
-        """
-        try:
-            # Try to get value from UI input first
-            if param_name in self.param_inputs:
-                ui_value = self.param_inputs[param_name].text().strip()
-                if ui_value and ui_value != "N/A":
-                    return float(ui_value)
-                    
-            # Fallback to metadata
-            if hasattr(self, 'metadata') and self.metadata:
-                meta_value = self.metadata.get(f"APP1:{param_name}", 
-                                             self.metadata.get(param_name))
-                if meta_value is not None and meta_value != "N/A":
-                    return float(meta_value)
-                    
-            return float(default_value)
-            
-        except (ValueError, TypeError):
-            return float(default_value)
 
 
 
-    def create_colored_pixmap(self):
-        """
-        Create a colored pixmap from temperature data using the selected palette.
-        
-        This method converts the calculated temperature matrix into a colored
-        visualization using the selected color palette. It handles normalization,
-        palette inversion, and creates the final QPixmap for display.
-        """
-        if self.temperature_data is None: 
-            return
-            
-        # Normalize temperature data to 0-1 range
-        temp_range = self.temp_max - self.temp_min
-        if temp_range == 0: 
-            temp_range = 1  # Avoid division by zero
-        
-        norm_data = (self.temperature_data - self.temp_min) / temp_range
-        norm_data = np.nan_to_num(norm_data)  # Replace NaN with 0
-        
-        # Apply color mapping
-        cmap = PALETTE_MAP.get(self.selected_palette, cm.inferno)
-        if self.palette_inverted:
-            norm_data = 1.0 - norm_data
-            
-        colored_data = cmap(norm_data)
-        
-        # Convert to 8-bit RGB
-        image_8bit = (colored_data[:, :, :3] * 255).astype(np.uint8)
-        
-        # Create QPixmap
-        height, width, _ = image_8bit.shape
-        q_image = QImage(image_8bit.data, width, height, width * 3, QImage.Format_RGB888)
-        self.base_pixmap = QPixmap.fromImage(q_image)
-        
-        self.display_thermal_image()
+
+
 
     def update_legend(self):
         """
@@ -1310,7 +1241,7 @@ class ThermalAnalyzerNG(QMainWindow):
         This method synchronizes the color bar legend widget with the current
         selected palette, inversion state, and calculated temperature range.
         """
-        if self.temperature_data is None:
+        if not hasattr(self, 'thermal_engine') or self.thermal_engine.temperature_data is None:
             return
             
         self.colorbar.set_palette(self.selected_palette, self.palette_inverted)
@@ -1397,17 +1328,17 @@ class ThermalAnalyzerNG(QMainWindow):
         Args:
             point (QPointF): Mouse position in image coordinates.
         """
-        if self.temperature_data is None:
+        if not hasattr(self, 'thermal_engine') or self.thermal_engine.temperature_data is None:
             self.temp_tooltip_label.setVisible(False)
             return
             
-        img_h, img_w = self.temperature_data.shape
+        img_h, img_w = self.thermal_engine.temperature_data.shape
         matrix_x = int(point.x())
         matrix_y = int(point.y())
         
         # Check if point is within image bounds
         if 0 <= matrix_x < img_w and 0 <= matrix_y < img_h:
-            temperature = self.temperature_data[matrix_y, matrix_x]
+            temperature = self.thermal_engine.get_temperature_at_point(matrix_x, matrix_y)
             if not np.isnan(temperature):
                 try:
                     emissivity = float(self.param_inputs["Emissivity"].text())
@@ -1781,8 +1712,6 @@ class ThermalAnalyzerNG(QMainWindow):
                     
                     # Handle median value
                     median_value = getattr(roi, 'temp_median', None)
-                    if median_value is None:
-                        median_value = self.calculate_roi_median(roi)
                     median_item = QTableWidgetItem(
                         f"{median_value:.2f}" if median_value is not None else "N/A"
                     )
@@ -1815,26 +1744,7 @@ class ThermalAnalyzerNG(QMainWindow):
                 del blocker  # Re-enable signals
             self._updating_roi_table = False
 
-    def calculate_roi_median(self, roi):
-        """
-        Calculate the median temperature for an ROI.
-        
-        Args:
-            roi: ROI model object.
-            
-        Returns:
-            float or None: Median temperature or None if calculation fails.
-        """
-        import numpy as np
-        temps = self.compute_roi_temperatures(roi)
-        if temps is None:
-            return None
-            
-        valid = temps[~np.isnan(temps)]
-        if valid.size == 0:
-            return None
-            
-        return float(np.median(valid))
+
 
     def on_roi_table_selection_changed(self):
         """Handle selection changes in the ROI table."""
@@ -2037,54 +1947,7 @@ class ThermalAnalyzerNG(QMainWindow):
         if hasattr(self, "btn_poly"):
             self.btn_poly.setChecked(False)
 
-    def update_single_roi(self, roi_model):
-        """
-        Update statistics for a single ROI.
-        
-        Args:
-            roi_model: The ROI model to update.
-        """
-        import numpy as np
-        from analysis.roi_models import SpotROI, PolygonROI
-        
-        if self.thermal_data is None:
-            # No thermal data available
-            roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = None
-            roi_model.temp_std = None
-            if hasattr(roi_model, 'temp_median'):
-                roi_model.temp_median = None
-        else:
-            # Calculate temperature statistics
-            temps = self.compute_roi_temperatures(roi_model)
-            if temps is not None:
-                valid = temps[~np.isnan(temps)]
-                if valid.size > 0:
-                    roi_model.temp_min = float(np.min(valid))
-                    roi_model.temp_max = float(np.max(valid))
-                    roi_model.temp_mean = float(np.mean(valid))
-                    roi_model.temp_std = float(np.std(valid))
-                    if hasattr(roi_model, 'temp_median'):
-                        roi_model.temp_median = float(np.median(valid))
-                else:
-                    # No valid temperature data
-                    roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = None
-                    roi_model.temp_std = None
-                    if hasattr(roi_model, 'temp_median'):
-                        roi_model.temp_median = None
-            else:
-                # Temperature computation failed
-                roi_model.temp_min = roi_model.temp_max = roi_model.temp_mean = None
-                roi_model.temp_std = None
-                if hasattr(roi_model, 'temp_median'):
-                    roi_model.temp_median = None
-                    
-        # Refresh visual label
-        item = self.roi_items.get(roi_model.id)
-        if item and hasattr(item, "refresh_label"):
-            item.refresh_label()
 
-        self.update_roi_table()
-        self.auto_save_settings()
 
     def on_label_settings_changed(self):
         """Handle changes to ROI label display settings."""
@@ -2217,7 +2080,7 @@ class ThermalAnalyzerNG(QMainWindow):
                 self.load_rois_from_data(settings_data["rois"])
                 
             # Update visualization if temperature data is available
-            if self.temperature_data is not None:
+            if hasattr(self, 'thermal_engine') and self.thermal_engine.temperature_data is not None:
                 self.update_view_only()
             
             print(f"Settings loaded successfully from: {json_path}")
@@ -2691,65 +2554,50 @@ class ThermalAnalyzerNG(QMainWindow):
             return False
 
     def on_roi_modified(self, roi_model):
-        """Handle ROI modified event from both UI and controller."""
-        print(f"🔄 ROI modified: {roi_model.name} (ID: {roi_model.id})")
+        """
+        Handle ROI modified event from UI graphics items.
         
-        # IMPORTANTE: Ricalcola le statistiche di temperatura per questo ROI
-        if hasattr(self, 'roi_controller') and hasattr(self, 'thermal_engine'):
-            if self.thermal_engine.temperature_data is not None:
-                print(f"  ➡️ Recalculating temperature statistics for {roi_model.name}")
-                
-                # Debug: check current ROI position
-                if hasattr(roi_model, 'x') and hasattr(roi_model, 'y'):
-                    print(f"    Position: ({roi_model.x:.1f}, {roi_model.y:.1f})")
-                    if hasattr(roi_model, 'width') and hasattr(roi_model, 'height'):
-                        print(f"    Size: {roi_model.width:.1f} x {roi_model.height:.1f}")
-                
-                # Find the ROI in controller and update it
-                controller_roi = self.roi_controller.get_roi_by_id(roi_model.id)
-                if controller_roi is not None:
-                    if controller_roi is roi_model:
-                        print("    ✅ Same object - updating directly")
-                    else:
-                        print("    ⚠️ Different object - syncing data")
-                        # Sync the data from the UI model to controller model
-                        if hasattr(roi_model, 'x'):
-                            controller_roi.x = roi_model.x
-                        if hasattr(roi_model, 'y'):
-                            controller_roi.y = roi_model.y
-                        if hasattr(roi_model, 'width'):
-                            controller_roi.width = roi_model.width
-                        if hasattr(roi_model, 'height'):
-                            controller_roi.height = roi_model.height
-                        if hasattr(roi_model, 'radius'):
-                            controller_roi.radius = roi_model.radius
-                        if hasattr(roi_model, 'points'):
-                            controller_roi.points = roi_model.points
-                    
-                    # Now update statistics
-                    self.roi_controller._update_roi_statistics(controller_roi)
-                    
-                    # Show debug info about calculated stats
-                    if hasattr(controller_roi, 'temp_mean') and controller_roi.temp_mean is not None:
-                        print(f"    📊 Stats: min={controller_roi.temp_min:.2f}°C, "
-                              f"max={controller_roi.temp_max:.2f}°C, "
-                              f"mean={controller_roi.temp_mean:.2f}°C")
-                    else:
-                        print("    ❌ No temperature statistics calculated")
-                else:
-                    print(f"    ❌ ROI {roi_model.id} not found in controller")
-            else:
-                print(f"  ⏸️ Skipping statistics (no thermal data)")
-        else:
-            print(f"  ❌ Missing controller or thermal engine")
+        This method acts as a simple bridge between UI and business logic.
+        It delegates geometry updates to the ROIController, which handles
+        statistics recalculation and emits the appropriate signals.
         
-        # Refresh visual label (ora con le nuove statistiche)
-        item = self.roi_items.get(roi_model.id)
-        if item and hasattr(item, "refresh_label"):
-            item.refresh_label()
-
-        # Update table (ora con i valori aggiornati)
-        self.update_roi_table()
+        Args:
+            roi_model: The ROI model with updated geometry from UI.
+        """
+        print(f"🔄 ROI modified from UI: {roi_model.name} (ID: {roi_model.id})")
+        
+        if not hasattr(self, 'roi_controller'):
+            print("❌ ROI controller not available")
+            return
+            
+        # Extract geometry data based on ROI type
+        geometry_data = {}
+        
+        # Common properties
+        if hasattr(roi_model, 'x'):
+            geometry_data['x'] = roi_model.x
+        if hasattr(roi_model, 'y'):
+            geometry_data['y'] = roi_model.y
+            
+        # Type-specific properties
+        if hasattr(roi_model, 'width'):
+            geometry_data['width'] = roi_model.width
+        if hasattr(roi_model, 'height'):
+            geometry_data['height'] = roi_model.height
+        if hasattr(roi_model, 'radius'):
+            geometry_data['radius'] = roi_model.radius
+        if hasattr(roi_model, 'points'):
+            geometry_data['points'] = roi_model.points
+            
+        # Delegate to ROI controller
+        success = self.roi_controller.update_roi_geometry(roi_model.id, geometry_data)
+        
+        if not success:
+            print(f"❌ Failed to update ROI geometry for {roi_model.id}")
+            return
+            
+        # The ROIController will emit roi_modified signal, which triggers
+        # on_roi_analysis_updated() that handles UI updates
         
         # Delay auto-save to avoid spam during dragging
         if not hasattr(self, '_roi_save_timer'):
@@ -2912,32 +2760,10 @@ class ThermalAnalyzerNG(QMainWindow):
                 else:
                     line_edit.setText(f"{float(value):.4f}")   # Standard precision
 
-    def update_analysis(self):
-        """
-        Legacy method - prefer recalculate_and_update_view().
-        
-        This method is maintained for backward compatibility but new code
-        should use the more explicit recalculate_and_update_view() method.
-        """
-        self.recalculate_and_update_view()
 
 
-    def create_colored_pixmap(self):
-        """
-        Create a colored pixmap from temperature data using the selected palette.
-        
-        This method delegates to the ThermalEngine and updates the UI display.
-        """
-        if not hasattr(self, 'thermal_engine'):
-            return
-            
-        pixmap = self.thermal_engine.create_colored_pixmap(
-            self.selected_palette, self.palette_inverted
-        )
-        
-        if not pixmap.isNull():
-            self.base_pixmap = pixmap
-            self.display_thermal_image()
+
+
 
     def update_legend(self):
         """
@@ -2987,26 +2813,7 @@ class ThermalAnalyzerNG(QMainWindow):
         
         self.temp_tooltip_label.setVisible(False)
 
-    def update_single_roi(self, roi_model):
-        """
-        Update statistics for a single ROI using the ROI controller.
-        
-        Args:
-            roi_model: The ROI model to update.
-        """
-        if hasattr(self, 'roi_controller'):
-            # Update via controller
-            self.roi_controller._update_roi_statistics(roi_model)
-            
-            # Refresh visual label
-            item = self.roi_items.get(roi_model.id)
-            if item and hasattr(item, "refresh_label"):
-                item.refresh_label()
 
-            self.update_roi_table()
-            self.auto_save_settings()
-        else:
-            print("ROI controller not available")
 
     def on_thermal_error(self, error_message: str):
         """Handle thermal engine errors."""
