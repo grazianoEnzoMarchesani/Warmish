@@ -11,9 +11,9 @@
   "palette": "Plasma",
   "palette_inverted": true,
   "temp_range_settings": {
-    "mode": "manual",
-    "manual_min": 22.0,
-    "manual_max": 120.0
+    "mode": "autorange",
+    "manual_min": 0.0,
+    "manual_max": 100.0
   },
   "overlay_settings": {
     "scale": 0.7405293836351845,

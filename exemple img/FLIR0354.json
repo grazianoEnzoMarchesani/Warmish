@@ -1,15 +1,15 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.1,
+    "Emissivity": 0.98,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5,
     "ObjectDistance": 1.0,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "Plasma",
-  "palette_inverted": true,
+  "palette": "Arctic",
+  "palette_inverted": false,
   "temp_range_settings": {
     "mode": "autorange",
     "manual_min": 0.0,
@@ -35,9 +35,9 @@
       "type": "RectROI",
       "name": "aaaa",
       "emissivity": 0.95,
-      "x": 76.29427792915531,
-      "y": 60.490463215258856,
-      "width": 40.5449591280654,
+      "x": 32,
+      "y": 107,
+      "width": 92.20708446866486,
       "height": 109.86376021798365
     },
     {
@@ -46,16 +46,16 @@
       "emissivity": 0.95,
       "points": [
         [
-          200.54495912806536,
-          142.8882833787466
+          185.02748247713106,
+          40.30826514033589
         ],
         [
-          297.3297002724795,
-          114.7683923705722
+          281.8122236215452,
+          12.1883741321615
         ],
         [
-          297.3297002724795,
-          204.35967302452315
+          281.8122236215452,
+          101.77965478611245
         ]
       ]
     },
@@ -63,8 +63,8 @@
       "type": "SpotROI",
       "name": "fffffff",
       "emissivity": 0.95,
-      "x": 46.2125340599455,
-      "y": 208.93732970027247,
+      "x": 186.15803814713894,
+      "y": 208.9373297002725,
       "radius": 36.15803814713895
     }
   ]

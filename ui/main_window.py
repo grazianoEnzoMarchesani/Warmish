@@ -638,7 +638,7 @@ class ThermalAnalyzerNG(QMainWindow):
         
         # Primary image view (thermal)
         self.image_view = ImageGraphicsView()
-        self.image_view.setStyleSheet("border: 1px solid gray; background-color: #333;")
+        self.image_view.setStyleSheet("border: 1px solid gray; background-color: #222;")
         
         # Connect existing signals
         self.image_view.mouse_moved_on_thermal.connect(self.on_thermal_mouse_move)
@@ -1088,22 +1088,14 @@ class ThermalAnalyzerNG(QMainWindow):
         self.invert_palette_button.clicked.connect(self.on_invert_palette)
         palette_selection_layout.addRow("", self.invert_palette_button)
         
-        # Temperature range section
+        # Temperature range section - simplified hierarchy
         range_control_widget = QWidget()
-        range_control_widget.setStyleSheet("""
-            QWidget {
-                border: 1px solid palette(mid);
-                border-radius: 6px;
-                padding: 8px;
-            }
-        """)
         range_control_layout = QVBoxLayout(range_control_widget)
         range_control_layout.setContentsMargins(12, 12, 12, 12)
-        range_control_layout.setSpacing(12)
+        range_control_layout.setSpacing(16)
         
         # Range mode selection
-        range_mode_container = QWidget()
-        range_mode_layout = QFormLayout(range_mode_container)
+        range_mode_layout = QFormLayout()
         range_mode_layout.setContentsMargins(0, 0, 0, 0)
         
         self.range_mode_combo = QComboBox()
@@ -1111,11 +1103,11 @@ class ThermalAnalyzerNG(QMainWindow):
         self.range_mode_combo.setCurrentText("autorange")
         self.range_mode_combo.setStyleSheet("""
             QComboBox {
-                padding: 6px 8px;
+                padding: 8px 12px;
                 border: 1px solid palette(mid);
                 border-radius: 4px;
-                font-size: 11px;
-                min-width: 100px;
+                font-size: 12px;
+                min-width: 120px;
             }
             QComboBox:focus {
                 border: 2px solid palette(highlight);
@@ -1123,41 +1115,31 @@ class ThermalAnalyzerNG(QMainWindow):
         """)
         self.range_mode_combo.currentTextChanged.connect(self.on_range_mode_changed)
         range_mode_layout.addRow("Range Mode:", self.range_mode_combo)
+ 
         
-        range_control_layout.addWidget(range_mode_container)
+        range_control_layout.addLayout(range_mode_layout)
         
-        # Manual range controls
+        # Manual range controls - simplified without extra container and title
         self.manual_range_widget = QWidget()
         self.manual_range_widget.setStyleSheet("""
             QWidget {
-                border: 1px solid palette(mid);
+                border: 0px solid black;
                 border-radius: 4px;
                 padding: 8px;
             }
         """)
         manual_range_main_layout = QVBoxLayout(self.manual_range_widget)
-        manual_range_main_layout.setContentsMargins(8, 8, 8, 8)
-        manual_range_main_layout.setSpacing(8)
+        manual_range_main_layout.setContentsMargins(0, 8, 0, 0)
+        manual_range_main_layout.setSpacing(12)
         
-        # Manual range title
-        manual_range_title = QLabel("Manual Range")
-        manual_range_title.setStyleSheet("""
-            QLabel {
-                font-weight: bold;
-                font-size: 10px;
-                margin-bottom: 4px;
-            }
-        """)
-        manual_range_main_layout.addWidget(manual_range_title)
-        
-        # Min/Max controls in a grid-like layout
+        # Min/Max controls in a cleaner grid layout
         self.manual_range_layout = QGridLayout()
         self.manual_range_layout.setContentsMargins(0, 0, 0, 0)
-        self.manual_range_layout.setSpacing(8)
+        self.manual_range_layout.setSpacing(12)
         
         # Min temperature
         min_label = QLabel("Min:")
-        min_label.setStyleSheet("font-size: 10px; font-weight: bold;")
+        min_label.setStyleSheet("font-size: 12px; font-weight: bold; color: black; border: 0px solid black;")
         self.temp_min_spin = QDoubleSpinBox()
         self.temp_min_spin.setRange(-273.15, 1000.0)
         self.temp_min_spin.setDecimals(2)
@@ -1165,20 +1147,18 @@ class ThermalAnalyzerNG(QMainWindow):
         self.temp_min_spin.setValue(0.0)
         self.temp_min_spin.setStyleSheet("""
             QDoubleSpinBox {
-                padding: 4px 6px;
-                border: 1px solid palette(mid);
-                border-radius: 3px;
-                font-size: 10px;
-            }
-            QDoubleSpinBox:focus {
-                border: 2px solid palette(highlight);
+                color: grey;
+                padding: 6px 8px;
+                border-radius: 4px;
+                font-size: 12px;
+                min-width: 80px;
             }
         """)
         self.temp_min_spin.valueChanged.connect(self.on_manual_range_changed)
         
         # Max temperature
         max_label = QLabel("Max:")
-        max_label.setStyleSheet("font-size: 10px; font-weight: bold;")
+        max_label.setStyleSheet("font-size: 12px; font-weight: bold; color: black; border: 0px solid black;")
         self.temp_max_spin = QDoubleSpinBox()
         self.temp_max_spin.setRange(-273.15, 1000.0)
         self.temp_max_spin.setDecimals(2)
@@ -1186,13 +1166,11 @@ class ThermalAnalyzerNG(QMainWindow):
         self.temp_max_spin.setValue(100.0)
         self.temp_max_spin.setStyleSheet("""
             QDoubleSpinBox {
-                padding: 4px 6px;
-                border: 1px solid palette(mid);
-                border-radius: 3px;
-                font-size: 10px;
-            }
-            QDoubleSpinBox:focus {
-                border: 2px solid palette(highlight);
+                color: grey;
+                padding: 6px 8px;
+                border-radius: 4px;
+                font-size: 12px;
+                min-width: 80px;
             }
         """)
         self.temp_max_spin.valueChanged.connect(self.on_manual_range_changed)
@@ -1213,6 +1191,14 @@ class ThermalAnalyzerNG(QMainWindow):
         self.range_mode = "autorange"
         self.manual_temp_min = 0.0
         self.manual_temp_max = 100.0
+        
+        # Apply subtle styling to range control widget
+        range_control_widget.setStyleSheet("""
+            QWidget {
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+            }
+        """)
         
         # Assemble the color visualization section
         palette_main_layout.addWidget(palette_selection_widget)
@@ -1247,8 +1233,6 @@ class ThermalAnalyzerNG(QMainWindow):
         self.all_meta_display.setReadOnly(True)
         self.all_meta_display.setStyleSheet("""
             QTextEdit {
-                background-color: #2c3e50;
-                color: #ecf0f1;
                 border: 1px solid palette(mid);
                 border-radius: 6px;
                 padding: 12px;
@@ -1257,17 +1241,14 @@ class ThermalAnalyzerNG(QMainWindow):
                 line-height: 1.4;
             }
             QScrollBar:vertical {
-                background-color: #34495e;
                 width: 12px;
                 border-radius: 6px;
             }
             QScrollBar::handle:vertical {
-                background-color: #7f8c8d;
                 border-radius: 6px;
                 min-height: 20px;
             }
             QScrollBar::handle:vertical:hover {
-                background-color: #95a5a6;
             }
         """)
         self.all_meta_display.setMinimumHeight(200)
