@@ -184,11 +184,12 @@ class RectROIItem(QGraphicsRectItem):
             self.model.x = new_pos.x()
             self.model.y = new_pos.y()
             
-            # Only notify about ROI modification if we're not currently moving
-            # This prevents continuous temperature calculations during drag
-            # Add safety check for _is_moving attribute
+            # Only notify about ROI modification if we're not currently moving OR resizing
+            # This prevents continuous temperature calculations during drag/resize operations
+            # Add safety checks for _is_moving and _resizing attributes
             is_moving = getattr(self, '_is_moving', False)
-            if not is_moving:
+            is_resizing = getattr(self, '_resizing', False)
+            if not is_moving and not is_resizing:
                 view_list = self.scene().views()
                 if view_list:
                     view = view_list[0]
@@ -745,11 +746,12 @@ class SpotROIItem(QGraphicsEllipseItem):
             self.model.x = float(new_position.x())
             self.model.y = float(new_position.y())
             
-            # Only notify about ROI modification if we're not currently moving
-            # This prevents continuous temperature calculations during drag
-            # Add safety check for _is_moving attribute
+            # Only notify about ROI modification if we're not currently moving OR resizing
+            # This prevents continuous temperature calculations during drag/resize operations
+            # Add safety checks for _is_moving and _resizing attributes
             is_moving = getattr(self, '_is_moving', False)
-            if not is_moving:
+            is_resizing = getattr(self, '_resizing', False)
+            if not is_moving and not is_resizing:
                 view_list = self.scene().views()
                 if view_list:
                     view = view_list[0]
@@ -1252,9 +1254,11 @@ class PolygonROIItem(QGraphicsPolygonItem):
                 new_point = original_polygon[i] + offset
                 self.model.points[i] = (new_point.x(), new_point.y())
             
-            # Only notify about the change if we're not currently moving
-            # This prevents continuous temperature calculations during drag
-            if not self._is_moving:
+            # Only notify about the change if we're not currently moving OR editing vertices
+            # This prevents continuous temperature calculations during drag/vertex edit operations
+            is_moving = getattr(self, '_is_moving', False)
+            is_editing = getattr(self, '_editing_vertices', False)
+            if not is_moving and not is_editing:
                 view_list = self.scene().views()
                 if view_list:
                     view = view_list[0]

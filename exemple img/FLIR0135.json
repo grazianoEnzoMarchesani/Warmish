@@ -8,12 +8,12 @@
     "ObjectDistance": 1.0,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "Iron",
+  "palette": "RdGy",
   "palette_inverted": false,
   "temp_range_settings": {
-    "mode": "autorange",
-    "manual_min": 0.0,
-    "manual_max": 100.0
+    "mode": "manual",
+    "manual_min": 41.97,
+    "manual_max": 62.35
   },
   "overlay_settings": {
     "scale": 0.7405293836351845,
@@ -30,5 +30,42 @@
     "avg": true,
     "median": false
   },
-  "rois": []
+  "rois": [
+    {
+      "type": "SpotROI",
+      "name": "Spot_1",
+      "emissivity": 0.95,
+      "x": 63.215258855585816,
+      "y": 189.31880108991828,
+      "radius": 35.50408719346049
+    },
+    {
+      "type": "RectROI",
+      "name": "ROI_2",
+      "emissivity": 0.95,
+      "x": 174,
+      "y": 17,
+      "width": 96.78474114441421,
+      "height": 81.74386920980928
+    },
+    {
+      "type": "PolygonROI",
+      "name": "Polygon_3",
+      "emissivity": 0.95,
+      "points": [
+        [
+          88.06539509536788,
+          59.182561307901906
+        ],
+        [
+          49.482288828337886,
+          89.26430517711171
+        ],
+        [
+          124.03269754768397,
+          126.53950953678473
+        ]
+      ]
+    }
+  ]
 }

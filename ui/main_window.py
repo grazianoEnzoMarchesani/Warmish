@@ -24,8 +24,8 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QComboBox, QApplication, QToolBar, QListWidget,
     QProgressBar, QListWidgetItem
 )
-from PySide6.QtCore import Qt, QPointF, QRectF, QSignalBlocker, QTimer
-from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QAction, QKeySequence
+from PySide6.QtCore import Qt, QPointF, QRectF, QSignalBlocker
+from PySide6.QtGui import QPixmap, QPainter, QAction, QKeySequence
 
 from ui.widgets.image_graphics_view import ImageGraphicsView
 from ui.widgets.color_bar_legend import ColorBarLegend
