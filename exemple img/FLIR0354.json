@@ -8,30 +8,35 @@
     "ObjectDistance": 1.0,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "PiYG",
+  "palette": "Lava",
   "palette_inverted": false,
+  "temp_range_settings": {
+    "mode": "manual",
+    "manual_min": 1.0,
+    "manual_max": 35.0
+  },
   "overlay_settings": {
     "scale": 0.7371037717330103,
     "offset_x": -10,
     "offset_y": -21,
-    "opacity": 50,
+    "opacity": 100,
     "blend_mode": "Normal"
   },
   "roi_label_settings": {
     "name": true,
     "emissivity": true,
-    "min": true,
-    "max": true,
-    "avg": true,
-    "median": false
+    "min": false,
+    "max": false,
+    "avg": false,
+    "median": true
   },
   "rois": [
     {
       "type": "SpotROI",
       "name": "a",
       "emissivity": 0.1,
-      "x": 52.75204359673026,
-      "y": 104.30517711171666,
+      "x": 54.05994550408721,
+      "y": 201.74386920980933,
       "radius": 35.50408719346049
     },
     {

@@ -49,6 +49,11 @@ class SettingsManager(QObject):
             },
             "palette": "Iron",
             "palette_inverted": False,
+            "temp_range_settings": {
+                "mode": "autorange",
+                "manual_min": 0.0,
+                "manual_max": 100.0
+            },
             "overlay_settings": {
                 "scale": 1.0,
                 "offset_x": 0,
@@ -93,7 +98,8 @@ class SettingsManager(QObject):
                      palette_settings: Dict[str, Any] = None,
                      overlay_settings: Dict[str, Any] = None,
                      roi_data: list = None,
-                     roi_label_settings: Dict[str, bool] = None) -> bool:
+                     roi_label_settings: Dict[str, bool] = None,
+                     temp_range_settings: Dict[str, Any] = None) -> bool:
         """
         Save current settings to JSON file.
         
@@ -103,6 +109,7 @@ class SettingsManager(QObject):
             overlay_settings (dict, optional): Overlay alignment settings.
             roi_data (list, optional): ROI definitions.
             roi_label_settings (dict, optional): ROI label display settings.
+            temp_range_settings (dict, optional): Temperature range settings.
             
         Returns:
             bool: True if saving was successful, False otherwise.
@@ -155,6 +162,13 @@ class SettingsManager(QObject):
                 
             if roi_label_settings:
                 settings_data["roi_label_settings"] = roi_label_settings
+                
+            if temp_range_settings:
+                settings_data["temp_range_settings"] = {
+                    "mode": temp_range_settings.get("mode", "autorange"),
+                    "manual_min": temp_range_settings.get("manual_min", 0.0),
+                    "manual_max": temp_range_settings.get("manual_max", 100.0)
+                }
                 
             # Ensure directory exists and save to file
             os.makedirs(os.path.dirname(json_path), exist_ok=True)

@@ -175,9 +175,23 @@ class ThermalAnalyzerNG(QMainWindow):
         """Handle temperatures calculated event."""
         print("Temperatures calculated successfully")
         
-        # Update temperature range for UI
-        self.temp_min = self.thermal_engine.temp_min
-        self.temp_max = self.thermal_engine.temp_max
+        # Apply range mode settings
+        if getattr(self, 'range_mode', 'autorange') == "autorange":
+            # Update temperature range from data
+            self.temp_min = self.thermal_engine.temp_min
+            self.temp_max = self.thermal_engine.temp_max
+            # Update UI spin boxes to show current autorange values
+            if hasattr(self, 'temp_min_spin') and hasattr(self, 'temp_max_spin'):
+                self.temp_min_spin.blockSignals(True)
+                self.temp_max_spin.blockSignals(True)
+                self.temp_min_spin.setValue(self.temp_min)
+                self.temp_max_spin.setValue(self.temp_max)
+                self.temp_min_spin.blockSignals(False)
+                self.temp_max_spin.blockSignals(False)
+        else:
+            # Use manual range values
+            self.thermal_engine.temp_min = getattr(self, 'manual_temp_min', 0.0)
+            self.thermal_engine.temp_max = getattr(self, 'manual_temp_max', 100.0)
         
         # Update visualization
         self.update_thermal_display()
@@ -336,6 +350,11 @@ class ThermalAnalyzerNG(QMainWindow):
             "opacity": int(self.overlay_alpha * 100),
             "blend_mode": self.overlay_blend_mode
         }
+        temp_range_settings = {
+            "mode": getattr(self, 'range_mode', 'autorange'),
+            "manual_min": getattr(self, 'manual_temp_min', 0.0),
+            "manual_max": getattr(self, 'manual_temp_max', 100.0)
+        }
         roi_data = self.roi_controller.export_roi_data()
         
         self.settings_manager.save_settings(
@@ -343,7 +362,8 @@ class ThermalAnalyzerNG(QMainWindow):
             palette_settings=palette_settings,
             overlay_settings=overlay_settings,
             roi_data=roi_data,
-            roi_label_settings=self.roi_label_settings
+            roi_label_settings=self.roi_label_settings,
+            temp_range_settings=temp_range_settings
         )
 
     def on_settings_loaded(self, settings_data):
@@ -371,6 +391,20 @@ class ThermalAnalyzerNG(QMainWindow):
             self.palette_inverted = settings_data.get("palette_inverted", False)
             if hasattr(self, 'invert_palette_button'):
                 self.invert_palette_button.setChecked(self.palette_inverted)
+                
+            # Apply temperature range settings
+            temp_range_settings = settings_data.get("temp_range_settings", {})
+            self.range_mode = temp_range_settings.get("mode", "autorange")
+            self.manual_temp_min = temp_range_settings.get("manual_min", 0.0)
+            self.manual_temp_max = temp_range_settings.get("manual_max", 100.0)
+            
+            if hasattr(self, 'range_mode_combo'):
+                self.range_mode_combo.setCurrentText(self.range_mode)
+                self.manual_range_widget.setEnabled(self.range_mode == "manual")
+                
+            if hasattr(self, 'temp_min_spin') and hasattr(self, 'temp_max_spin'):
+                self.temp_min_spin.setValue(self.manual_temp_min)
+                self.temp_max_spin.setValue(self.manual_temp_max)
             
             # Apply overlay settings
             overlay = settings_data.get("overlay_settings", {})
@@ -810,6 +844,47 @@ class ThermalAnalyzerNG(QMainWindow):
         self.invert_palette_button.clicked.connect(self.on_invert_palette)
         self.palette_layout.addRow("", self.invert_palette_button)
         
+        # Temperature range settings
+        self.range_mode_combo = QComboBox()
+        self.range_mode_combo.addItems(["autorange", "manual"])
+        self.range_mode_combo.setCurrentText("autorange")
+        self.range_mode_combo.currentTextChanged.connect(self.on_range_mode_changed)
+        self.palette_layout.addRow("Range Mode:", self.range_mode_combo)
+        
+        # Manual range controls
+        self.manual_range_widget = QWidget()
+        self.manual_range_layout = QHBoxLayout(self.manual_range_widget)
+        self.manual_range_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.temp_min_spin = QDoubleSpinBox()
+        self.temp_min_spin.setRange(-273.15, 1000.0)
+        self.temp_min_spin.setDecimals(2)
+        self.temp_min_spin.setSuffix(" °C")
+        self.temp_min_spin.setValue(0.0)
+        self.temp_min_spin.valueChanged.connect(self.on_manual_range_changed)
+        
+        self.temp_max_spin = QDoubleSpinBox()
+        self.temp_max_spin.setRange(-273.15, 1000.0)
+        self.temp_max_spin.setDecimals(2)
+        self.temp_max_spin.setSuffix(" °C")
+        self.temp_max_spin.setValue(100.0)
+        self.temp_max_spin.valueChanged.connect(self.on_manual_range_changed)
+        
+        self.manual_range_layout.addWidget(QLabel("Min:"))
+        self.manual_range_layout.addWidget(self.temp_min_spin)
+        self.manual_range_layout.addWidget(QLabel("Max:"))
+        self.manual_range_layout.addWidget(self.temp_max_spin)
+        
+        self.palette_layout.addRow("Manual Range:", self.manual_range_widget)
+        
+        # Initially disable manual range controls
+        self.manual_range_widget.setEnabled(False)
+        
+        # Initialize range mode settings
+        self.range_mode = "autorange"
+        self.manual_temp_min = 0.0
+        self.manual_temp_max = 100.0
+        
         self.tab_params_layout.addWidget(self.palette_groupbox)
         
         # Metadata display
@@ -1115,6 +1190,17 @@ class ThermalAnalyzerNG(QMainWindow):
             self.selected_palette = "Iron"
             self.palette_inverted = False
             
+            # Reset range settings
+            self.range_mode = "autorange"
+            self.manual_temp_min = 0.0
+            self.manual_temp_max = 100.0
+            if hasattr(self, 'range_mode_combo'):
+                self.range_mode_combo.setCurrentText("autorange")
+                self.manual_range_widget.setEnabled(False)
+            if hasattr(self, 'temp_min_spin') and hasattr(self, 'temp_max_spin'):
+                self.temp_min_spin.setValue(0.0)
+                self.temp_max_spin.setValue(100.0)
+            
             # Reset overlay settings to defaults
             self.overlay_scale = 1.0
             self.overlay_offset_x = 0.0
@@ -1216,7 +1302,7 @@ class ThermalAnalyzerNG(QMainWindow):
             return
             
         self.colorbar.set_palette(self.selected_palette, self.palette_inverted)
-        self.colorbar.set_range(self.temp_min, self.temp_max)
+        self.colorbar.set_range(self.thermal_engine.temp_min, self.thermal_engine.temp_max)
 
     def on_palette_changed(self, idx):
         """
@@ -1233,6 +1319,64 @@ class ThermalAnalyzerNG(QMainWindow):
         self.palette_inverted = not self.palette_inverted
         self.update_view_only()
         self.auto_save_settings()  # Era save_settings_to_json()
+        
+    def on_range_mode_changed(self, mode: str):
+        """
+        Handle temperature range mode change.
+        
+        Args:
+            mode (str): Either "autorange" or "manual".
+        """
+        self.range_mode = mode
+        self.manual_range_widget.setEnabled(mode == "manual")
+        
+        if mode == "autorange":
+            # Update range from current temperature data
+            self._update_autorange()
+        else:
+            # Use manual range values
+            self.thermal_engine.temp_min = self.manual_temp_min
+            self.thermal_engine.temp_max = self.manual_temp_max
+            
+        self.update_view_only()
+        self.auto_save_settings()
+        
+    def on_manual_range_changed(self):
+        """Handle manual temperature range changes."""
+        if self.range_mode == "manual":
+            min_val = self.temp_min_spin.value()
+            max_val = self.temp_max_spin.value()
+            
+            # Ensure min is less than max
+            if min_val >= max_val:
+                # Adjust the other value
+                if self.sender() == self.temp_min_spin:
+                    self.temp_max_spin.setValue(min_val + 1.0)
+                    max_val = min_val + 1.0
+                else:
+                    self.temp_min_spin.setValue(max_val - 1.0)
+                    min_val = max_val - 1.0
+            
+            self.manual_temp_min = min_val
+            self.manual_temp_max = max_val
+            self.thermal_engine.temp_min = min_val
+            self.thermal_engine.temp_max = max_val
+            
+            self.update_view_only()
+            self.auto_save_settings()
+            
+    def _update_autorange(self):
+        """Update temperature range automatically from data."""
+        if self.thermal_engine and hasattr(self.thermal_engine, '_update_temperature_range'):
+            self.thermal_engine._update_temperature_range()
+            # Update UI to show current range (for information only)
+            if hasattr(self, 'temp_min_spin') and hasattr(self, 'temp_max_spin'):
+                self.temp_min_spin.blockSignals(True)
+                self.temp_max_spin.blockSignals(True)
+                self.temp_min_spin.setValue(self.thermal_engine.temp_min)
+                self.temp_max_spin.setValue(self.thermal_engine.temp_max)
+                self.temp_min_spin.blockSignals(False)
+                self.temp_max_spin.blockSignals(False)
         
     def on_thermal_mouse_move(self, point: QPointF):
         """
@@ -2015,6 +2159,21 @@ class ThermalAnalyzerNG(QMainWindow):
             if "palette_inverted" in settings_data:
                 self.palette_inverted = settings_data["palette_inverted"]
                 
+            # Restore temperature range settings
+            if "temp_range_settings" in settings_data:
+                temp_range_settings = settings_data["temp_range_settings"]
+                self.range_mode = temp_range_settings.get("mode", "autorange")
+                self.manual_temp_min = temp_range_settings.get("manual_min", 0.0)
+                self.manual_temp_max = temp_range_settings.get("manual_max", 100.0)
+                
+                if hasattr(self, 'range_mode_combo'):
+                    self.range_mode_combo.setCurrentText(self.range_mode)
+                    self.manual_range_widget.setEnabled(self.range_mode == "manual")
+                    
+                if hasattr(self, 'temp_min_spin') and hasattr(self, 'temp_max_spin'):
+                    self.temp_min_spin.setValue(self.manual_temp_min)
+                    self.temp_max_spin.setValue(self.manual_temp_max)
+                
             # Restore overlay settings
             if "overlay_settings" in settings_data:
                 overlay = settings_data["overlay_settings"]
@@ -2109,6 +2268,14 @@ class ThermalAnalyzerNG(QMainWindow):
         # Connect palette control signals
         if hasattr(self, 'palette_combo'):
             self.palette_combo.currentTextChanged.connect(self.auto_save_settings)
+            
+        # Connect range control signals
+        if hasattr(self, 'range_mode_combo'):
+            self.range_mode_combo.currentTextChanged.connect(self.auto_save_settings)
+        if hasattr(self, 'temp_min_spin'):
+            self.temp_min_spin.valueChanged.connect(self.auto_save_settings)
+        if hasattr(self, 'temp_max_spin'):
+            self.temp_max_spin.valueChanged.connect(self.auto_save_settings)
             
         # Connect overlay control signals
         if hasattr(self, 'overlay_alpha_slider'):
@@ -3273,6 +3440,13 @@ class ThermalAnalyzerNG(QMainWindow):
             
             if "palette_inverted" in self.preset_data:
                 self.palette_inverted = self.preset_data["palette_inverted"]
+                
+            # Apply temperature range settings from preset
+            if "temp_range_settings" in self.preset_data:
+                temp_range_settings = self.preset_data["temp_range_settings"]
+                self.range_mode = temp_range_settings.get("mode", "autorange")
+                self.manual_temp_min = temp_range_settings.get("manual_min", 0.0)
+                self.manual_temp_max = temp_range_settings.get("manual_max", 100.0)
             
             # ✅ AGGIUNTA: Applicare i parametri di overlay dal preset
             if "overlay_settings" in self.preset_data:

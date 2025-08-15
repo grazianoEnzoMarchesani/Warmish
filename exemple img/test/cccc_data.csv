@@ -1,31 +1,31 @@
 # Thermal Analysis Export
-# Generated on,2025-08-15 15:26:11
+# Generated on,2025-08-15 15:58:13
 
-Original Image,flir_20250811T121654.jpg
+Original Image,FLIR0354.jpg
 
 # Global Thermal Parameters
-Emissivity,0.9
-ObjectDistance,3.0
-ReflectedApparentTemperature,24.999994
-PlanckR1,17959.80078125
-PlanckR2,0.012500000186
-PlanckB,1435.0
+Emissivity,0.883
+ObjectDistance,1.0
+ReflectedApparentTemperature,19.999994
+PlanckR1,16222.7666015625
+PlanckR2,0.011103133671
+PlanckB,1421.90002441406
 PlanckF,1.0
-PlanckO,-1957.0
+PlanckO,-5328.0
 AtmosphericTemperature,20.0
 AtmosphericTransmission,0.95
 RelativeHumidity,0.5
 
 # Global Temperature Statistics
-global_temp_min_celsius,29.43
-global_temp_max_celsius,32.04
-global_temp_mean_celsius,30.61
-global_temp_median_celsius,30.43
-global_temp_std_dev_celsius,0.53
-total_pixel_count,307200.00
+global_temp_min_celsius,20.43
+global_temp_max_celsius,53.77
+global_temp_mean_celsius,32.28
+global_temp_median_celsius,32.57
+global_temp_std_dev_celsius,6.85
+total_pixel_count,76800.00
 
 # Visualization Settings
-Color Palette,Ocean
+Color Palette,Lava
 Palette Inverted,False
 Overlay Mode,True
 Overlay Scale,0.737
@@ -36,6 +36,6 @@ Overlay Blend Mode,Normal
 
 # ROI Analysis Data
 roi_name,roi_type,emissivity,temp_min_celsius,temp_max_celsius,temp_mean_celsius,temp_median_celsius,temp_std_dev_celsius,pixel_count
-a,SpotROI,0.100,61.74,72.14,64.59,64.10,1.67,3939
-b,RectROI,0.500,35.66,36.23,35.93,35.91,0.11,2226
-c,PolygonROI,0.950,30.26,31.17,30.84,30.88,0.24,3518
+a,SpotROI,0.100,24.61,92.84,61.97,63.40,12.38,3938
+b,RectROI,0.500,28.34,37.17,30.74,30.66,1.27,2226
+c,PolygonROI,0.950,25.79,40.29,31.22,31.62,3.62,3527
