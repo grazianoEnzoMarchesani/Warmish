@@ -53,6 +53,10 @@ class ColorBarLegend(QWidget):
         
         # Avoid unit repetition if present in title
         self._show_units_on_ticks = False
+        
+        # Set transparent background for PNG exports
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setStyleSheet("background-color: transparent;")
 
     def set_range(self, vmin: float, vmax: float):
         """Set the value range for the color bar.

@@ -560,17 +560,19 @@ class ThermalEngine(QObject):
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setRenderHint(QPainter.TextAntialiasing)
             
-            # Draw title background for better readability
-            title_bg_rect = QRect(0, 0, final_width, title_height)
-            painter.fillRect(title_bg_rect, QColor(255, 255, 255, 220))  # Semi-transparent white background
+            # Keep transparent background for PNG exports - no background or border for title
             
-            # Draw title border
-            painter.setPen(QPen(QColor(200, 200, 200), max(1, int(scale_factor))))
-            painter.drawRect(title_bg_rect)
-            
-            # Draw title text
+            # Draw title text with good contrast on transparent background
             painter.setFont(title_font)
-            painter.setPen(QColor(0, 0, 0))  # Black text on white background
+            # Use dark text with white outline for better visibility on any background
+            painter.setPen(QColor(255, 255, 255))  # White outline
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if dx != 0 or dy != 0:
+                        title_rect_outline = QRect(dx, dy, final_width, title_height)
+                        painter.drawText(title_rect_outline, Qt.AlignCenter, title_text)
+            
+            painter.setPen(QColor(0, 0, 0))  # Black text on top
             
             title_rect = QRect(0, 0, final_width, title_height)
             painter.drawText(title_rect, Qt.AlignCenter, title_text)
