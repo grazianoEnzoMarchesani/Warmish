@@ -954,6 +954,17 @@ class ThermalAnalyzerNG(QMainWindow):
         self.tab_batch_layout.setContentsMargins(16, 16, 16, 16)
         self.tab_batch_layout.setSpacing(12)
         
+        # Export section (unchanged)
+        export_group = QGroupBox("Export")
+        export_layout = QVBoxLayout(export_group)
+        
+        self.btn_export_current = QPushButton("Export Current Analysis")
+
+        export_layout.addWidget(self.btn_export_current)
+        
+        self.tab_batch_layout.addWidget(export_group)
+        self.sidebar_tabs.addTab(self.tab_batch, "Export")
+
         # Preset Configuration Section
         preset_group = QGroupBox("Preset Configuration")
         preset_layout = QVBoxLayout(preset_group)
@@ -982,7 +993,7 @@ class ThermalAnalyzerNG(QMainWindow):
         self.tab_batch_layout.addWidget(preset_group)
         
         # Batch Images Section
-        batch_group = QGroupBox("Batch Images")
+        batch_group = QGroupBox("Batch Export")
         batch_layout = QVBoxLayout(batch_group)
         
         # Image selection controls
@@ -1022,28 +1033,7 @@ class ThermalAnalyzerNG(QMainWindow):
         
         self.tab_batch_layout.addWidget(batch_group)
         
-        # Export section (unchanged)
-        export_group = QGroupBox("Export Options")
-        export_layout = QVBoxLayout(export_group)
-        
-        export_format_layout = QHBoxLayout()
-        self.btn_export_png = QPushButton("Image (.PNG)")
-        self.btn_export_csv = QPushButton("Data (.CSV)")
-        self.btn_export_pdf = QPushButton("Report (.PDF)")
-        self.btn_export_raw = QPushButton("Raw Data")
-        
-        export_format_layout.addWidget(self.btn_export_png)
-        export_format_layout.addWidget(self.btn_export_csv)
-        export_format_layout.addWidget(self.btn_export_pdf)
-        export_format_layout.addWidget(self.btn_export_raw)
-        export_layout.addLayout(export_format_layout)
-        
-        self.btn_export_current = QPushButton("Export Current Analysis")
 
-        export_layout.addWidget(self.btn_export_current)
-        
-        self.tab_batch_layout.addWidget(export_group)
-        self.sidebar_tabs.addTab(self.tab_batch, "Batch & Export")
         
         # Initialize batch processing data
         self.batch_images = []
