@@ -197,7 +197,10 @@ class SettingsManager(QObject):
         
         json_path = self.get_json_file_path()
         if not json_path or not os.path.exists(json_path):
-            return None
+            # Emit default settings if no file exists
+            print("No settings file found, using defaults")
+            self.settings_loaded.emit(self.default_settings.copy())
+            return self.default_settings.copy()
         
         try:
             with open(json_path, 'r', encoding='utf-8') as f:

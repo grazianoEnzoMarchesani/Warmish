@@ -167,9 +167,8 @@ class ThermalAnalyzerNG(QMainWindow):
         # Update metadata display  # <-- AGGIUNGI QUESTA RIGA
         self.update_metadata_display()  # <-- AGGIUNGI QUESTA RIGA
         
-        # Calculate initial temperatures
-        thermal_params = self.get_current_thermal_parameters()
-        self.thermal_engine.calculate_temperatures(thermal_params)
+        # Note: Temperature calculation is now done in on_settings_loaded()
+        # after range settings are properly loaded
 
     def on_temperatures_calculated(self):
         """Handle temperatures calculated event."""
@@ -189,9 +188,17 @@ class ThermalAnalyzerNG(QMainWindow):
                 self.temp_min_spin.blockSignals(False)
                 self.temp_max_spin.blockSignals(False)
         else:
-            # Use manual range values
-            self.thermal_engine.temp_min = getattr(self, 'manual_temp_min', 0.0)
-            self.thermal_engine.temp_max = getattr(self, 'manual_temp_max', 100.0)
+            # Use manual range values - make sure they override the autorange
+            manual_min = getattr(self, 'manual_temp_min', 0.0)
+            manual_max = getattr(self, 'manual_temp_max', 100.0)
+            
+            # Apply manual values to both the engine and local variables
+            self.thermal_engine.temp_min = manual_min
+            self.thermal_engine.temp_max = manual_max
+            self.temp_min = manual_min
+            self.temp_max = manual_max
+            
+            print(f"Applied manual temperature range: {manual_min:.2f} - {manual_max:.2f} °C")
         
         # Update visualization
         self.update_thermal_display()
@@ -469,9 +476,14 @@ class ThermalAnalyzerNG(QMainWindow):
             if roi_data:
                 self.roi_controller.import_roi_data(roi_data)
                 
-            # Update view with loaded settings
-            if self.thermal_engine.temperature_data is not None:
-                self.update_thermal_display()
+            # Calculate temperatures with loaded settings (including range mode)
+            if self.thermal_engine.thermal_data is not None:
+                thermal_params = self.get_current_thermal_parameters()
+                self.thermal_engine.calculate_temperatures(thermal_params)
+            else:
+                # If no thermal data yet, update view with loaded settings
+                if self.thermal_engine.temperature_data is not None:
+                    self.update_thermal_display()
                 
         finally:
             # Re-enable auto-save

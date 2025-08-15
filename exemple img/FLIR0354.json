@@ -1,24 +1,24 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.883,
+    "Emissivity": 0.11,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5,
     "ObjectDistance": 1.0,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "Lava",
-  "palette_inverted": false,
+  "palette": "Ice",
+  "palette_inverted": true,
   "temp_range_settings": {
-    "mode": "manual",
-    "manual_min": 1.0,
-    "manual_max": 35.0
+    "mode": "autorange",
+    "manual_min": 0.0,
+    "manual_max": 100.0
   },
   "overlay_settings": {
-    "scale": 0.7371037717330103,
+    "scale": 0.7405293836351845,
     "offset_x": -10,
-    "offset_y": -21,
+    "offset_y": -27,
     "opacity": 100,
     "blend_mode": "Normal"
   },
@@ -26,52 +26,56 @@
     "name": true,
     "emissivity": true,
     "min": false,
-    "max": false,
-    "avg": false,
-    "median": true
+    "max": true,
+    "avg": true,
+    "median": false
   },
   "rois": [
     {
-      "type": "SpotROI",
-      "name": "a",
+      "type": "RectROI",
+      "name": "ROI_1",
       "emissivity": 0.1,
-      "x": 54.05994550408721,
-      "y": 201.74386920980933,
-      "radius": 35.50408719346049
+      "x": 14.0,
+      "y": -24.0,
+      "width": 62.75057802105913,
+      "height": 75.58592352536667
     },
     {
-      "type": "RectROI",
-      "name": "b",
-      "emissivity": 0.5,
-      "x": 247.0,
-      "y": 173.0,
-      "width": 41.852861035422336,
-      "height": 52.316076294277934
+      "type": "SpotROI",
+      "name": "Spot_2",
+      "emissivity": 0.001,
+      "x": 214.31362164984478,
+      "y": 195.87659451365465,
+      "radius": 21.537953795379508
+    },
+    {
+      "type": "SpotROI",
+      "name": "Spot_3",
+      "emissivity": 0.3,
+      "x": 121.8152031125411,
+      "y": 93.5449998639398,
+      "radius": 10.0
     },
     {
       "type": "PolygonROI",
-      "name": "c",
+      "name": "Polygon_4",
       "emissivity": 0.95,
       "points": [
         [
-          139.72752043596736,
-          187.3569482288828
+          95.63386199792997,
+          206.1271738566387
         ],
         [
-          139.72752043596736,
-          114.76839237057217
+          189.04665427927935,
+          186.16108084993806
         ],
         [
-          196.62125340599465,
-          116.7302452316076
+          148.40139351563877,
+          169.760361594434
         ],
         [
-          196.62125340599465,
-          169.70027247956398
-        ],
-        [
-          139.72752043596736,
-          187.3569482288828
+          95.63386199792997,
+          206.1271738566387
         ]
       ]
     }
