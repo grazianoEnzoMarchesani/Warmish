@@ -1,11 +1,11 @@
 # Thermal Analysis Export
-# Generated on,2025-08-15 00:43:47
+# Generated on,2025-08-15 14:39:35
 
 Original Image,FLIR0135.jpg
 
 # Global Thermal Parameters
-Emissivity,0.134
-ObjectDistance,3.469
+Emissivity,0.883
+ObjectDistance,1.0
 ReflectedApparentTemperature,19.999994
 PlanckR1,16222.7666015625
 PlanckR2,0.011103133671
@@ -17,20 +17,20 @@ AtmosphericTransmission,0.95
 RelativeHumidity,0.5
 
 # Global Temperature Statistics
-global_temp_min_celsius,55.21
-global_temp_max_celsius,184.19
-global_temp_mean_celsius,119.38
-global_temp_median_celsius,118.91
-global_temp_std_dev_celsius,16.94
+global_temp_min_celsius,26.10
+global_temp_max_celsius,57.67
+global_temp_mean_celsius,40.56
+global_temp_median_celsius,40.35
+global_temp_std_dev_celsius,4.20
 total_pixel_count,76800.00
 
 # Visualization Settings
-Color Palette,Pink
-Palette Inverted,True
+Color Palette,PiYG
+Palette Inverted,False
 Overlay Mode,False
 
 # ROI Analysis Data
 roi_name,roi_type,emissivity,temp_min_celsius,temp_max_celsius,temp_mean_celsius,temp_median_celsius,temp_std_dev_celsius,pixel_count
-ciao,RectROI,0.950,36.73,42.28,38.15,37.92,0.79,3264
-mamma,SpotROI,0.950,36.62,39.83,37.42,37.38,0.48,1656
-guarda,PolygonROI,0.950,28.68,55.36,38.29,38.70,3.72,2760
+a,SpotROI,0.100,98.18,221.82,147.64,149.13,19.45,3940
+b,RectROI,0.500,49.24,58.46,52.16,52.32,1.60,2226
+c,PolygonROI,0.950,34.83,42.33,38.62,38.36,1.30,3527

@@ -164,6 +164,9 @@ class ThermalAnalyzerNG(QMainWindow):
         # Populate thermal parameters from metadata
         self.populate_params_from_engine()
         
+        # Update metadata display  # <-- AGGIUNGI QUESTA RIGA
+        self.update_metadata_display()  # <-- AGGIUNGI QUESTA RIGA
+        
         # Calculate initial temperatures
         thermal_params = self.get_current_thermal_parameters()
         self.thermal_engine.calculate_temperatures(thermal_params)
@@ -1402,6 +1405,8 @@ class ThermalAnalyzerNG(QMainWindow):
             if hasattr(self.image_view, 'get_scale_info'):
                 scale_info = self.image_view.get_scale_info()
                 print(f"Scale info: {scale_info}")
+        # Save settings after updating the variable
+        self.auto_save_settings()
 
     def on_offsetx_changed(self, value: int):
         """
@@ -1413,6 +1418,8 @@ class ThermalAnalyzerNG(QMainWindow):
         self.overlay_offset_x = float(value)
         if self.overlay_mode:
             self.display_images()
+        # Save settings after updating the variable
+        self.auto_save_settings()
 
     def on_offsety_changed(self, value: int):
         """
@@ -1424,6 +1431,8 @@ class ThermalAnalyzerNG(QMainWindow):
         self.overlay_offset_y = float(value)
         if self.overlay_mode:
             self.display_images()
+        # Save settings after updating the variable
+        self.auto_save_settings()
 
     def on_reset_alignment(self):
         """Reset overlay alignment to metadata values."""
@@ -2121,12 +2130,6 @@ class ThermalAnalyzerNG(QMainWindow):
             self.palette_combo.currentTextChanged.connect(self.auto_save_settings)
             
         # Connect overlay control signals
-        if hasattr(self, 'scale_spin'):
-            self.scale_spin.valueChanged.connect(self.auto_save_settings)
-        if hasattr(self, 'offsetx_spin'):
-            self.offsetx_spin.valueChanged.connect(self.auto_save_settings)
-        if hasattr(self, 'offsety_spin'):
-            self.offsety_spin.valueChanged.connect(self.auto_save_settings)
         if hasattr(self, 'overlay_alpha_slider'):
             self.overlay_alpha_slider.valueChanged.connect(self.auto_save_settings)
         if hasattr(self, 'blend_combo'):
@@ -2289,26 +2292,17 @@ class ThermalAnalyzerNG(QMainWindow):
             traceback.print_exc()
 
     def _export_thermal_image(self, file_path: str) -> bool:
-        """
-        Export the current thermal image with applied palette and settings.
+        """Export the thermal image with current settings."""
+        current_params = self.get_current_thermal_parameters()
         
-        Args:
-            file_path (str): Path where to save the thermal image.
-            
-        Returns:
-            bool: True if export was successful, False otherwise.
-        """
-        try:
-            if not hasattr(self, 'thermal_engine'):
-                return False
-                
-            return self.thermal_engine.export_thermal_image(
-                file_path, self.selected_palette, self.palette_inverted, 
-                include_legend=True
-            )
-        except Exception as e:
-            print(f"Error exporting thermal image: {e}")
-            return False
+        return self.thermal_engine.export_thermal_image(
+            file_path, 
+            self.selected_palette, 
+            self.palette_inverted, 
+            scale_factor=2.0, 
+            include_legend=True,
+            current_thermal_params=current_params
+        )
 
     def _export_visible_image(self, file_path: str) -> bool:
         """
@@ -2409,44 +2403,18 @@ class ThermalAnalyzerNG(QMainWindow):
             return False
 
     def _export_thermal_with_rois(self, file_path: str) -> bool:
-        """
-        Export thermal image with ROIs drawn on top.
+        """Export thermal image with ROIs drawn on top."""
+        current_params = self.get_current_thermal_parameters()
         
-        Args:
-            file_path (str): Path where to save the thermal image with ROIs.
-            
-        Returns:
-            bool: True if export was successful, False otherwise.
-        """
-        try:
-            if not hasattr(self, 'thermal_engine'):
-                return False
-            
-            # Debug: check ROI items
-            print(f"🔍 Export thermal with ROIs:")
-            print(f"  📊 Total ROI items: {len(self.roi_items)}")
-            for roi_id, roi_item in self.roi_items.items():
-                try:
-                    if hasattr(roi_item, 'model'):
-                        roi_model = roi_item.model
-                        print(f"    • {roi_id}: {roi_model.name} ({roi_model.__class__.__name__})")
-                        print(f"      Position: ({roi_model.x:.1f}, {roi_model.y:.1f})")
-                        if hasattr(roi_model, 'temp_mean') and roi_model.temp_mean is not None:
-                            print(f"      Temp stats: {roi_model.temp_mean:.1f}°C avg")
-                    else:
-                        print(f"    • {roi_id}: No model found")
-                except Exception as e:
-                    print(f"    • {roi_id}: Error accessing ROI - {e}")
-                
-            return self.thermal_engine.export_thermal_with_rois(
-                file_path, self.selected_palette, self.palette_inverted, self.roi_items,
-                include_legend=True
-            )
-        except Exception as e:
-            print(f"Error exporting thermal image with ROIs: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
+        return self.thermal_engine.export_thermal_with_rois(
+            file_path, 
+            self.selected_palette, 
+            self.palette_inverted, 
+            self.roi_items,  # ✅ CORRETTO: MainWindow.roi_items, non roi_controller.roi_items
+            scale_factor=2.0, 
+            include_legend=True,
+            current_thermal_params=current_params
+        )
 
     def _export_current_scene(self, file_path: str) -> bool:
         """
@@ -3224,25 +3192,31 @@ class ThermalAnalyzerNG(QMainWindow):
     def _process_single_image_with_preset(self, image_path, output_dir):
         """
         Process a single image with the loaded preset.
-        
-        Args:
-            image_path (str): Path to the thermal image
-            output_dir (str): Directory for output files
-            
-        Returns:
-            bool: True if processing was successful
         """
         try:
             # Store current state to restore later
             original_image_path = self.current_image_path
             
-            # Load the thermal image
+            # SOLUZIONE 1: Disabilitare temporaneamente il caricamento automatico
+            # per evitare conflitti con il preset
+            self.thermal_engine.data_loaded.disconnect(self.on_thermal_data_loaded)
+            
+            # Load the thermal image (senza automatic settings loading)
             if not self.thermal_engine.load_thermal_image(image_path):
                 print(f"Failed to load thermal data from {image_path}")
                 return False
             
-            # Apply preset configuration
-            self._apply_preset_to_current_image()
+            # AGGIUNTA: Settare i percorsi dell'immagine corrente (essenziale per l'export!)
+            self.current_image_path = image_path
+            self.settings_manager.set_current_image_path(image_path)
+            
+            # SOLUZIONE 2: Applicare PRIMA il preset e POI calcolare le temperatures
+            self._apply_preset_to_current_image_for_batch()
+            
+            # Calcolare le temperatures con i parametri del preset
+            thermal_params = self.get_current_thermal_parameters()
+            if self.thermal_engine.calculate_temperatures(thermal_params):
+                self.roi_controller.update_all_analyses()
             
             # Generate output filename base
             image_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -3253,54 +3227,81 @@ class ThermalAnalyzerNG(QMainWindow):
             
         except Exception as e:
             print(f"Error processing {image_path}: {e}")
+            import traceback
+            traceback.print_exc()  # Debug completo degli errori
             return False
+        finally:
+            # IMPORTANTE: Ricollegare il signal
+            self.thermal_engine.data_loaded.connect(self.on_thermal_data_loaded)
+            
+            # Ripristinare lo stato originale
+            self.current_image_path = original_image_path
+            if original_image_path:
+                self.settings_manager.set_current_image_path(original_image_path)
 
-    def _apply_preset_to_current_image(self):
-        """Apply the loaded preset configuration to the currently loaded image."""
+    def _apply_preset_to_current_image_for_batch(self):
+        """Apply preset configuration specifically for batch processing."""
         if not self.preset_data:
             return
         
         try:
-            # Disable auto-save during preset application
             self._ignore_auto_save = True
             
-            # Apply thermal parameters
+            # Popolare PRIMA i parametri dall'immagine (come base)
+            self.populate_params_from_engine()
+            
+            # Poi sovrascrivere SOLO i parametri del preset se richiesto
             if self.cb_thermal_params.isChecked() and "thermal_parameters" in self.preset_data:
                 for param, value in self.preset_data["thermal_parameters"].items():
                     if param in self.param_inputs:
                         self.param_inputs[param].setText(str(value))
             
-            # Apply color palette
-            if self.cb_color_palette.isChecked() and "palette" in self.preset_data:
+            # Applicare la palette (sempre, dato che rimuoveremo il checkbox)
+            if "palette" in self.preset_data:
                 palette_name = self.preset_data["palette"]
                 palette_index = self.palette_combo.findText(palette_name)
                 if palette_index >= 0:
                     self.palette_combo.setCurrentIndex(palette_index)
                     self.selected_palette = palette_name
             
-            # Apply palette inversion
-            if self.cb_color_palette.isChecked() and "palette_inverted" in self.preset_data:
+            if "palette_inverted" in self.preset_data:
                 self.palette_inverted = self.preset_data["palette_inverted"]
             
-            # Apply ROIs using the ROI controller (FIX: Use roi_controller instead of direct loading)
-            if self.cb_analysis_areas.isChecked() and "rois" in self.preset_data:
-                # Clear existing ROIs first
-                self.roi_controller.clear_all_rois()
+            # ✅ AGGIUNTA: Applicare i parametri di overlay dal preset
+            if "overlay_settings" in self.preset_data:
+                overlay = self.preset_data["overlay_settings"]
                 
-                # Import ROIs using the controller
+                if "scale" in overlay:
+                    self.overlay_scale = overlay["scale"]
+                    
+                if "offset_x" in overlay:
+                    self.overlay_offset_x = overlay["offset_x"]
+                    
+                if "offset_y" in overlay:
+                    self.overlay_offset_y = overlay["offset_y"]
+                    
+                if "opacity" in overlay:
+                    self.overlay_alpha = overlay["opacity"] / 100.0
+                    
+                if "blend_mode" in overlay:
+                    self.overlay_blend_mode = overlay["blend_mode"]
+                
+                print(f"🔧 Applied overlay settings from preset:")
+                print(f"  - Scale: {self.overlay_scale}")
+                print(f"  - Offset: ({self.overlay_offset_x}, {self.overlay_offset_y})")
+                print(f"  - Alpha: {self.overlay_alpha}")
+                print(f"  - Blend mode: {self.overlay_blend_mode}")
+            
+            # Applicare i ROI solo se richiesto
+            if self.cb_analysis_areas.isChecked() and "rois" in self.preset_data:
+                self.roi_controller.clear_all_rois()
                 imported_count = self.roi_controller.import_roi_data(self.preset_data["rois"])
                 print(f"Imported {imported_count} ROIs from preset")
-            
-            # Calculate temperatures with new parameters
-            thermal_params = self.get_current_thermal_parameters()
-            if self.thermal_engine.calculate_temperatures(thermal_params):
-                # Update ROI analysis with new temperatures
-                self.roi_controller.update_all_analyses()
-            
+            # Se NON richiesto, lasciare i ROI vuoti (non caricare dal JSON dell'immagine)
+                
         except Exception as e:
             print(f"Error applying preset: {e}")
         finally:
-            # Re-enable auto-save
             self._ignore_auto_save = False
 
     def _export_image_analysis(self, base_path):
@@ -3347,3 +3348,45 @@ class ThermalAnalyzerNG(QMainWindow):
         except Exception as e:
             print(f"Error exporting analysis for {base_path}: {e}")
             return False
+
+    def update_metadata_display(self):
+        """Update the metadata display with all extracted metadata."""
+        if not self.thermal_engine.metadata:
+            self.all_meta_display.setText("No metadata available.")
+            return
+        
+        # Format all metadata for display
+        metadata_text = "EXTRACTED METADATA:\n" + "="*50 + "\n\n"
+        
+        # Group metadata by prefix for better organization
+        groups = {}
+        for key, value in self.thermal_engine.metadata.items():
+            if ":" in key:
+                prefix = key.split(":")[0]
+            else:
+                prefix = "General"
+            
+            if prefix not in groups:
+                groups[prefix] = []
+            groups[prefix].append((key, value))
+        
+        # Display metadata by groups
+        for group_name, items in sorted(groups.items()):
+            metadata_text += f"[{group_name}]\n"
+            metadata_text += "-" * 30 + "\n"
+            
+            for key, value in sorted(items):
+                # Format the value appropriately
+                if isinstance(value, float):
+                    if abs(value) > 1000 or (abs(value) < 0.001 and value != 0):
+                        formatted_value = f"{value:.6e}"
+                    else:
+                        formatted_value = f"{value:.6f}"
+                else:
+                    formatted_value = str(value)
+                
+                metadata_text += f"{key}: {formatted_value}\n"
+            
+            metadata_text += "\n"
+        
+        self.all_meta_display.setText(metadata_text)

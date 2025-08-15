@@ -1118,12 +1118,19 @@ class ImageGraphicsView(QGraphicsView):
                                 palette_name = parent_widget.selected_palette
                                 inverted = parent_widget.palette_inverted
                                 print(f"  - Using palette from main window: {palette_name}, inverted: {inverted}")
+                                
+                                # Get current thermal parameters from main window
+                                current_thermal_params = None
+                                if hasattr(parent_widget, 'get_current_thermal_parameters'):
+                                    current_thermal_params = parent_widget.get_current_thermal_parameters()
+                                    print(f"  - Using current thermal params from UI: {current_thermal_params}")
                             else:
                                 print(f"  - Using default palette: {palette_name}, inverted: {inverted}")
+                                current_thermal_params = None
                             
-                            # Use the thermal engine's combine method
+                            # Use the thermal engine's combine method with current thermal parameters
                             export_pixmap = thermal_engine._combine_image_with_legend(
-                                export_pixmap, palette_name, inverted, scale_factor
+                                export_pixmap, palette_name, inverted, scale_factor, current_thermal_params
                             )
                             print("✅ Legend added to overlay export")
                             

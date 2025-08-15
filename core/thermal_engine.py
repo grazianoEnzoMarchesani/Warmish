@@ -12,8 +12,8 @@ import subprocess
 import numpy as np
 from PIL import Image
 import exiftool
-from PySide6.QtGui import QPixmap, QImage, QPainter, QPen, QBrush, QColor, QPolygonF
-from PySide6.QtCore import QObject, Signal, Qt, QPointF, QRectF
+from PySide6.QtGui import QPixmap, QImage, QPainter, QPen, QBrush, QColor, QPolygonF, QFont
+from PySide6.QtCore import QObject, Signal, Qt, QPointF, QRectF, QRect
 
 from constants import PALETTE_MAP
 import matplotlib.cm as cm
@@ -455,7 +455,8 @@ class ThermalEngine(QObject):
         self.current_image_path = None
 
     def _create_legend_pixmap(self, palette_name: str, inverted: bool, 
-                            target_height: int, scale_factor: float = 1.0) -> QPixmap:
+                            target_height: int, scale_factor: float = 1.0,
+                            current_thermal_params: dict = None) -> QPixmap:
         """
         Create a legend pixmap with current temperature range and palette.
         
@@ -464,14 +465,24 @@ class ThermalEngine(QObject):
             inverted (bool): Whether to invert the palette.
             target_height (int): Target height for the legend to match image height.
             scale_factor (float): Scale factor for legend size.
+            current_thermal_params (dict, optional): Current thermal parameters from UI.
             
         Returns:
-            QPixmap: Rendered legend as pixmap.
+            QPixmap: Rendered legend as pixmap with title.
         """
         try:
             print(f"🎨 Creating legend pixmap: palette={palette_name}, inverted={inverted}, scale={scale_factor}")
             print(f"  - Temperature range: {self.temp_min:.1f}°C to {self.temp_max:.1f}°C")
             print(f"  - Target height: {target_height}px")
+            
+            # Get emissivity value - use current params if provided, otherwise fallback to metadata
+            if current_thermal_params and "Emissivity" in current_thermal_params:
+                emissivity = current_thermal_params["Emissivity"]
+                print(f"  - Using current UI emissivity: {emissivity:.3f}")
+            else:
+                thermal_params = self.get_thermal_parameters_from_metadata()
+                emissivity = thermal_params.get("Emissivity", 0.95)
+                print(f"  - Using metadata emissivity: {emissivity:.3f}")
             
             # Import ColorBarLegend locally to avoid circular imports
             from ui.widgets.color_bar_legend import ColorBarLegend
@@ -485,11 +496,35 @@ class ThermalEngine(QObject):
             legend.set_precision(1)
             legend.set_show_units_on_ticks(True)
             
-            # Calculate legend size - use target height and scale width
+            # Calculate title dimensions
+            title_text = f"Temperature °C | ε {emissivity:.3f}"
+            title_font_size = int(14 * scale_factor)  # Increased from 10
+            title_height = int(35 * scale_factor)     # Increased from 25
+            title_margin = int(8 * scale_factor)      # Increased from 5
+            
+            # Calculate required width for title text
+            title_font = QFont()
+            title_font.setPointSizeF(title_font_size)
+            title_font.setBold(True)
+            title_font.setFamily("Arial")
+            
+            from PySide6.QtGui import QFontMetrics
+            title_metrics = QFontMetrics(title_font)
+            title_text_width = title_metrics.horizontalAdvance(title_text)
+            title_required_width = title_text_width + int(20 * scale_factor)  # Add padding
+            
+            # Calculate legend size - use target height minus space for title
             legend_width = int(90 * scale_factor)
-            legend_height = target_height  # Use exact image height
+            available_legend_height = target_height - title_height - title_margin
+            legend_height = max(available_legend_height, int(100 * scale_factor))  # Minimum height
+            
+            # Use the larger width between title and legend
+            final_width = max(title_required_width, legend_width)
             
             print(f"  - Legend size: {legend_width}x{legend_height}")
+            print(f"  - Title: '{title_text}' (height: {title_height}px)")
+            print(f"  - Title required width: {title_required_width}px")
+            print(f"  - Final width: {final_width}px")
             
             # Adjust font size for scaled legend
             font = legend.font()
@@ -504,7 +539,7 @@ class ThermalEngine(QObject):
             from PySide6.QtWidgets import QApplication
             QApplication.processEvents()
             
-            # Create pixmap with transparent background
+            # Create legend pixmap
             legend_pixmap = QPixmap(legend_width, legend_height)
             legend_pixmap.fill(Qt.transparent)  # Transparent background
             
@@ -515,8 +550,43 @@ class ThermalEngine(QObject):
             legend.hide()
             legend.deleteLater()
             
-            print(f"✅ Legend pixmap created: {legend_pixmap.width()}x{legend_pixmap.height()}")
-            return legend_pixmap
+            # Create final pixmap with title and legend
+            final_height = title_height + title_margin + legend_height
+            final_pixmap = QPixmap(final_width, final_height)
+            final_pixmap.fill(Qt.transparent)
+            
+            # Paint title and legend
+            painter = QPainter(final_pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.TextAntialiasing)
+            
+            # Draw title background for better readability
+            title_bg_rect = QRect(0, 0, final_width, title_height)
+            painter.fillRect(title_bg_rect, QColor(255, 255, 255, 220))  # Semi-transparent white background
+            
+            # Draw title border
+            painter.setPen(QPen(QColor(200, 200, 200), max(1, int(scale_factor))))
+            painter.drawRect(title_bg_rect)
+            
+            # Draw title text
+            painter.setFont(title_font)
+            painter.setPen(QColor(0, 0, 0))  # Black text on white background
+            
+            title_rect = QRect(0, 0, final_width, title_height)
+            painter.drawText(title_rect, Qt.AlignCenter, title_text)
+            
+            # Draw legend below title (centered if final_width > legend_width)
+            legend_y = title_height + title_margin
+            legend_x = (final_width - legend_width) // 2  # Center the legend horizontally
+            painter.drawPixmap(legend_x, legend_y, legend_pixmap)
+            
+            painter.end()
+            
+            print(f"✅ Legend pixmap with title created: {final_pixmap.width()}x{final_pixmap.height()}")
+            print(f"  - Title position: (0, 0) - size: {final_width}x{title_height}")
+            print(f"  - Legend position: ({legend_x}, {legend_y}) - size: {legend_width}x{legend_height}")
+            
+            return final_pixmap
             
         except Exception as e:
             print(f"❌ Error creating legend pixmap: {e}")
@@ -525,7 +595,8 @@ class ThermalEngine(QObject):
             return QPixmap()
 
     def _combine_image_with_legend(self, image_pixmap: QPixmap, palette_name: str, 
-                                  inverted: bool, scale_factor: float = 1.0) -> QPixmap:
+                                  inverted: bool, scale_factor: float = 1.0,
+                                  current_thermal_params: dict = None) -> QPixmap:
         """
         Combine thermal image with legend on the right side.
         
@@ -534,6 +605,7 @@ class ThermalEngine(QObject):
             palette_name (str): Color palette name.
             inverted (bool): Whether palette is inverted.
             scale_factor (float): Scale factor for sizing.
+            current_thermal_params (dict, optional): Current thermal parameters from UI.
             
         Returns:
             QPixmap: Combined image with legend on the right.
@@ -548,7 +620,8 @@ class ThermalEngine(QObject):
             
             # Create legend pixmap with the exact height of the thermal image
             legend_pixmap = self._create_legend_pixmap(palette_name, inverted, 
-                                                     image_pixmap.height(), scale_factor)
+                                                     image_pixmap.height(), scale_factor,
+                                                     current_thermal_params)
             
             if legend_pixmap.isNull():
                 print("⚠️ Could not create legend, returning original image")
@@ -594,8 +667,9 @@ class ThermalEngine(QObject):
             return image_pixmap
 
     def export_thermal_image(self, file_path: str, palette_name: str = "Iron", 
-                           inverted: bool = False, scale_factor: float = 2.0,
-                           include_legend: bool = True) -> bool:
+                       inverted: bool = False, scale_factor: float = 2.0,
+                       include_legend: bool = True, 
+                       current_thermal_params: dict = None) -> bool:
         """
         Export the thermal image with specified palette settings.
         
@@ -605,6 +679,7 @@ class ThermalEngine(QObject):
             inverted (bool): Whether to invert the palette.
             scale_factor (float): Scale factor for export resolution (default 2.0 for high quality).
             include_legend (bool): Whether to include the color legend (default True).
+            current_thermal_params (dict, optional): Current thermal parameters from UI.
             
         Returns:
             bool: True if export was successful, False otherwise.
@@ -632,7 +707,7 @@ class ThermalEngine(QObject):
             
             # Add legend if requested
             if include_legend:
-                pixmap = self._combine_image_with_legend(pixmap, palette_name, inverted, scale_factor)
+                pixmap = self._combine_image_with_legend(pixmap, palette_name, inverted, scale_factor, current_thermal_params)
             
             # Save the pixmap
             success = pixmap.save(file_path, "PNG")
@@ -648,7 +723,9 @@ class ThermalEngine(QObject):
             return success
             
         except Exception as e:
-            print(f"Error exporting thermal image: {e}")
+            print(f"❌ Error exporting thermal image: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def export_visible_image(self, file_path: str) -> bool:
@@ -715,18 +792,20 @@ class ThermalEngine(QObject):
         return stats
 
     def export_thermal_with_rois(self, file_path: str, palette_name: str = "Iron", 
-                                inverted: bool = False, roi_items: dict = None, 
-                                scale_factor: float = 2.0, include_legend: bool = True) -> bool:
+                               inverted: bool = False, roi_items: dict = None, 
+                               scale_factor: float = 2.0, include_legend: bool = True,
+                               current_thermal_params: dict = None) -> bool:
         """
         Export thermal image with ROIs drawn on top.
         
         Args:
-            file_path (str): Path where to save the image.
+            file_path (str): Path where to save the thermal image with ROIs.
             palette_name (str): Color palette to use.
             inverted (bool): Whether to invert the palette.
             roi_items (dict): Dictionary of ROI items to draw.
-            scale_factor (float): Scale factor for export resolution (default 2.0 for high quality).
-            include_legend (bool): Whether to include the color legend (default True).
+            scale_factor (float): Scale factor for export resolution.
+            include_legend (bool): Whether to include the color legend.
+            current_thermal_params (dict, optional): Current thermal parameters from UI.
             
         Returns:
             bool: True if export was successful, False otherwise.
@@ -761,7 +840,7 @@ class ThermalEngine(QObject):
                 print("⚠️ No ROI items provided, saving plain thermal image")
                 # Still add legend if requested
                 if include_legend:
-                    thermal_pixmap = self._combine_image_with_legend(thermal_pixmap, palette_name, inverted, scale_factor)
+                    thermal_pixmap = self._combine_image_with_legend(thermal_pixmap, palette_name, inverted, scale_factor, current_thermal_params)
                 return thermal_pixmap.save(file_path, "PNG")
             
             print(f"📊 Drawing {len(roi_items)} ROIs on thermal image")
@@ -868,7 +947,7 @@ class ThermalEngine(QObject):
             
             # Add legend if requested
             if include_legend:
-                thermal_pixmap = self._combine_image_with_legend(thermal_pixmap, palette_name, inverted, scale_factor)
+                thermal_pixmap = self._combine_image_with_legend(thermal_pixmap, palette_name, inverted, scale_factor, current_thermal_params)
             
             # Save the result
             success = thermal_pixmap.save(file_path, "PNG")
