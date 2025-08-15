@@ -38,6 +38,7 @@ class ColorBarLegend(QWidget):
         self._draw_background = False  # Keep transparent by default
         self._unit = "°C"
         self._precision = 1
+        self._forced_text_color = None  # Force specific text color for exports
         
         # Use smaller font for elegant appearance
         _f = self.font()
@@ -140,6 +141,15 @@ class ColorBarLegend(QWidget):
         self._show_units_on_ticks = bool(enabled)
         self.update()
 
+    def set_forced_text_color(self, color):
+        """Set a forced text color for exports, overriding theme-based color.
+        
+        Args:
+            color: QColor instance, or None to use automatic theme-based color.
+        """
+        self._forced_text_color = color
+        self.update()
+
     def _make_bar_pixmap(self, height: int, width: int = 28) -> QPixmap:
         """Create a gradient bar pixmap with the current palette.
         
@@ -213,9 +223,13 @@ class ColorBarLegend(QWidget):
                 t = (val - vmin) / rng  # 0..1 bottom -> top mapping
                 y = int(bar_y + (1.0 - t) * bar_h)
                 
-                # Use system text color for better theme compatibility
-                from PySide6.QtWidgets import QApplication
-                text_color = QApplication.palette().color(QApplication.palette().ColorRole.Text)
+                # Use forced color for exports, or system color for UI
+                if self._forced_text_color is not None:
+                    text_color = self._forced_text_color
+                else:
+                    # Use system text color for better theme compatibility
+                    from PySide6.QtWidgets import QApplication
+                    text_color = QApplication.palette().color(QApplication.palette().ColorRole.Text)
                 p.setPen(QPen(text_color, 1))
                 
                 p.drawLine(bar_x + bar_w, y, bar_x + bar_w + tick_len, y)
@@ -247,7 +261,16 @@ class ColorBarLegend(QWidget):
             for val in values:
                 t = (val - vmin) / rng
                 x = int(bar_x + t * bar_w_pix)
-                p.setPen(QPen(QColor(40, 40, 40), 1))
+                
+                # Use forced color for exports, or system color for UI
+                if self._forced_text_color is not None:
+                    text_color = self._forced_text_color
+                else:
+                    # Use system text color for better theme compatibility
+                    from PySide6.QtWidgets import QApplication
+                    text_color = QApplication.palette().color(QApplication.palette().ColorRole.Text)
+                p.setPen(QPen(text_color, 1))
+                
                 p.drawLine(x, bar_y + bar_h, x, bar_y + bar_h + tick_len)
                 label = f"{val:.{self._precision}f}" + (f" {self._unit}" if self._show_units_on_ticks else "")
                 label_w = fm.horizontalAdvance(label)

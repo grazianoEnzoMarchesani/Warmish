@@ -1,25 +1,25 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.77,
+    "Emissivity": 0.2,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5,
     "ObjectDistance": 1.0,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "RdGy",
-  "palette_inverted": false,
+  "palette": "Plasma",
+  "palette_inverted": true,
   "temp_range_settings": {
     "mode": "manual",
-    "manual_min": 41.97,
-    "manual_max": 62.35
+    "manual_min": 22.0,
+    "manual_max": 120.0
   },
   "overlay_settings": {
     "scale": 0.7405293836351845,
     "offset_x": -10,
     "offset_y": -27,
-    "opacity": 73,
+    "opacity": 100,
     "blend_mode": "Normal"
   },
   "roi_label_settings": {
@@ -32,40 +32,40 @@
   },
   "rois": [
     {
-      "type": "SpotROI",
-      "name": "Spot_1",
-      "emissivity": 0.95,
-      "x": 63.215258855585816,
-      "y": 189.31880108991828,
-      "radius": 35.50408719346049
-    },
-    {
       "type": "RectROI",
-      "name": "ROI_2",
+      "name": "aaaa",
       "emissivity": 0.95,
-      "x": 174,
-      "y": 17,
-      "width": 96.78474114441421,
-      "height": 81.74386920980928
+      "x": 76.29427792915531,
+      "y": 60.490463215258856,
+      "width": 40.5449591280654,
+      "height": 109.86376021798365
     },
     {
       "type": "PolygonROI",
-      "name": "Polygon_3",
+      "name": "ssss",
       "emissivity": 0.95,
       "points": [
         [
-          88.06539509536788,
-          59.182561307901906
+          213.62397820163486,
+          125.88555858310627
         ],
         [
-          49.482288828337886,
-          89.26430517711171
+          310.408719346049,
+          97.76566757493188
         ],
         [
-          124.03269754768397,
-          126.53950953678473
+          310.408719346049,
+          187.35694822888283
         ]
       ]
+    },
+    {
+      "type": "SpotROI",
+      "name": "fffffff",
+      "emissivity": 0.95,
+      "x": 72.37057220708446,
+      "y": 208.93732970027247,
+      "radius": 13.26975476839236
     }
   ]
 }

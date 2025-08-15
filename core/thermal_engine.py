@@ -487,6 +487,7 @@ class ThermalEngine(QObject):
             # Import ColorBarLegend locally to avoid circular imports
             from ui.widgets.color_bar_legend import ColorBarLegend
             from PySide6.QtCore import QPoint
+            from PySide6.QtGui import QColor
             
             # Create a temporary legend widget
             legend = ColorBarLegend()
@@ -495,6 +496,8 @@ class ThermalEngine(QObject):
             legend.set_unit("°C")
             legend.set_precision(1)
             legend.set_show_units_on_ticks(True)
+            # Force black text for exported images to ensure readability
+            legend.set_forced_text_color(QColor(0, 0, 0))
             
             # Calculate title dimensions
             title_text = f"Temperature °C | ε {emissivity:.3f}"
