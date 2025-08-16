@@ -7,7 +7,7 @@
 
 ---
 
-### ✨ **Current Version Highlights**
+### **Current Version Highlights**
 
 *   **Advanced Graphics Architecture:** Fully migrated to `QGraphicsView` and `QGraphicsScene`, ensuring fluid zooming, responsive panning, and optimal management of graphical objects.
 *   **Comprehensive ROI Analysis:** Implemented tools to create **Rectangles, Spots (circles), and Polygons**. ROIs are fully interactive: they can be moved, resized via control handles, and edited (vertex editing for polygons).
@@ -97,7 +97,7 @@
 
 ## Technical Requirements
 
-- **Language**: Python 3 (developed and tested with Python 3.13+)
+- **Language**: Python 3 (**3.11 recommended**; developed on 3.13)
 - **GUI**: PySide6 (Qt for Python)
 - **Processing**: numpy, Pillow (PIL)
 - **Colours**: matplotlib
@@ -110,9 +110,11 @@
 
 ### 1) Prerequisites
 
-- **Python 3** (3.13.5 or newer recommended).
-- **ExifTool** installed and accessible in the system `PATH`.
-  - Official website: [ExifTool](https://exiftool.org)
+- **Python 3** (version 3.11 is recommended for best compatibility with packaging tools).
+- **ExifTool** must be installed and accessible in the system `PATH`.
+  - **Official website:** [ExifTool](https://exiftool.org)
+  - **On macOS (using Homebrew):** `brew install exiftool`
+  - **On Windows:** Download the standalone executable, rename it to `exiftool.exe`, and place it in a directory included in your system's PATH.
   - Verify the installation with the command: `exiftool -ver`
 
 ### 2) Python Dependencies
@@ -123,10 +125,14 @@ Clone the repository and install the required libraries using the `requirements.
 git clone https://github.com/yourusername/warmish.git
 cd warmish
 
-# Optional: create and activate a virtual environment
-# python -m venv .venv
-# source .venv/bin/activate  (on macOS/Linux)
-# .\.venv\Scripts\Activate.ps1 (on Windows PowerShell)
+# Create and activate a virtual environment (recommended)
+# On macOS/Linux:
+python3.11 -m venv venv
+source venv/bin/activate
+
+# On Windows (PowerShell):
+# py -3.11 -m venv venv
+# .\venv\Scripts\Activate.ps1
 
 # Install dependencies
 pip install -r requirements.txt
@@ -154,6 +160,33 @@ python main.py
 9.  Use the "Export" tab to save all analysis artefacts (images, overlay, CSV data) for the current image.
 
 ---
+
+## Creating a Standalone Executable
+
+To simplify distribution, you can package the application into a standalone executable using **PyInstaller**. This bundles Python, all libraries, and **ExifTool** into a single, easy-to-run package for macOS or Windows.
+
+**1. Prepare ExifTool:**
+   - **macOS:** Install ExifTool (e.g., via Homebrew) and copy the executable into the project's root directory: `cp $(which exiftool) ./exiftool_bin`
+   - **Windows:** Download the standalone `exiftool(-k).exe`, rename it to `exiftool_bin.exe`, and place it in the project's root directory.
+
+**2. Update Code (if not already done):**
+   - Ensure `thermal_engine.py` and `main.py` use the provided `resource_path` function to locate assets like `exiftool_bin` and the splash screen SVG. This has already been done in the current version of the repository.
+
+**3. Run PyInstaller:**
+   - From the project's root directory, run the command for your OS.
+
+   **macOS (recommended `--onedir` mode):**
+   ```bash
+   pyinstaller --name "Warmish" --windowed --onedir --add-binary "exiftool_bin:." --add-data "Warmish Logo.svg:." --icon="Icon.icns" main.py
+   ```
+
+   **Windows:**
+   ```bash
+   pyinstaller --name "Warmish" --windowed --onefile --add-binary "exiftool_bin.exe;." --add-data "Warmish Logo.svg;." --icon="icon.ico" main.py
+   ```
+
+The final application will be located in the `dist/` directory.
+
 
 ## Known Limitations
 
@@ -185,7 +218,8 @@ The next priorities for development include:
     - Intelligent data caching to improve responsiveness.
 
 5.  **Packaging and Distribution:**
-    - Creating standalone executable packages for macOS and Windows to simplify distribution to end-users.
+    - **DONE:** Creating standalone executable packages for macOS and Windows to simplify distribution to end-users.
+    - **NEXT:** Automate the build process (e.g., via GitHub Actions) and implement code signing for macOS.
 
 ---
 
