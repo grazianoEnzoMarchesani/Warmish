@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QCheckBox, QFileDialog, QMessageBox, QSlider, QSpinBox,
     QDoubleSpinBox, QComboBox, QApplication, QToolBar, QListWidget,
-    QProgressBar, QListWidgetItem, QScrollArea, QFrame
+    QProgressBar, QListWidgetItem, QScrollArea, QFrame, QSizePolicy
 )
 from PySide6.QtCore import Qt, QPointF, QRectF, QSignalBlocker
 from PySide6.QtGui import QPixmap, QPainter, QAction, QKeySequence
@@ -50,7 +50,7 @@ class ThermalAnalyzerNG(QMainWindow):
         super().__init__(parent)
         
         self.setWindowTitle("Thermal Analyzer NG")
-        self.setMinimumSize(1200, 800)
+        self.setMinimumSize(1400, 800)  # Increased from 1200 to accommodate content
         
         # Initialize business logic components
         self.thermal_engine = ThermalEngine()
@@ -579,46 +579,185 @@ class ThermalAnalyzerNG(QMainWindow):
         tools_menu.addAction(clear_rois_action)
 
     def _setup_toolbar(self):
-        """Setup the main toolbar."""
-        toolbar = QToolBar('Main Toolbar', self)
-        toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.addToolBar(toolbar)
+        """Setup the main toolbar with consistent styling."""
+        # Create a custom toolbar widget instead of QToolBar
+        toolbar_widget = QWidget()
+        toolbar_widget.setFixedHeight(75)  # Aumentato leggermente da 50 a 55px
+        toolbar_widget.setStyleSheet("""
+            QWidget {
+                background-color: palette(window);
+                border-bottom: 2px solid palette(mid);
+                padding: 6px 8px;
+            }
+        """)
         
-        # Open button
-        open_action = QAction('📁 Open', self)
-        open_action.setStatusTip('Open thermal image file')
-        open_action.triggered.connect(self.open_image)
-        toolbar.addAction(open_action)
+        toolbar_layout = QHBoxLayout(toolbar_widget)
+        toolbar_layout.setContentsMargins(8, 6, 8, 6)  # Margini leggermente aumentati
+        toolbar_layout.setSpacing(16)  # Aumentato spacing tra sezioni
         
-        toolbar.addSeparator()
+        # === FILE OPERATIONS SECTION ===
+        file_section = self._create_toolbar_section("File", [
+            ("Open", "Open thermal image file", self.open_image, "#3498db")
+        ])
+        toolbar_layout.addWidget(file_section)
         
-        # Zoom controls
-        zoom_in_action = QAction('🔍+ Zoom In', self)
-        zoom_in_action.setStatusTip('Zoom in')
-        zoom_in_action.triggered.connect(self.zoom_in)
-        toolbar.addAction(zoom_in_action)
+        # Add vertical separator
+        toolbar_layout.addWidget(self._create_toolbar_separator())
         
-        zoom_out_action = QAction('🔍- Zoom Out', self)
-        zoom_out_action.setStatusTip('Zoom out')
-        zoom_out_action.triggered.connect(self.zoom_out)
-        toolbar.addAction(zoom_out_action)
+        # === VIEW CONTROLS SECTION ===
+        view_section = self._create_toolbar_section("View", [
+            ("Zoom In", "Zoom in", self.zoom_in, "#27ae60"),
+            ("Zoom Out", "Zoom out", self.zoom_out, "#27ae60"),
+            ("Reset", "Reset zoom to fit", self.zoom_reset, "#27ae60")
+        ])
+        toolbar_layout.addWidget(view_section)
         
-        zoom_reset_action = QAction('🔍= Reset', self)
-        zoom_reset_action.setStatusTip('Reset zoom to fit')
-        zoom_reset_action.triggered.connect(self.zoom_reset)
-        toolbar.addAction(zoom_reset_action)
+        # Add vertical separator
+        toolbar_layout.addWidget(self._create_toolbar_separator())
         
-        toolbar.addSeparator()
+        # === OVERLAY CONTROLS SECTION ===
+        overlay_section = self._create_toolbar_section("Overlay", [])
+        overlay_section_layout = overlay_section.findChild(QHBoxLayout)
         
-        # Overlay toggle
-        overlay_toggle_action = QAction('🔄 Overlay', self)
-        overlay_toggle_action.setCheckable(True)
-        overlay_toggle_action.setStatusTip('Toggle overlay mode')
-        overlay_toggle_action.triggered.connect(self.on_overlay_toggled)
-        toolbar.addAction(overlay_toggle_action)
+        # Special overlay toggle button (checkable)
+        self.toolbar_overlay_button = QPushButton("Overlay")
+        self.toolbar_overlay_button.setCheckable(True)
+        self.toolbar_overlay_button.setToolTip("Toggle overlay mode")
+        self.toolbar_overlay_button.setStyleSheet("""
+            QPushButton {
+                padding: 6px 14px;
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                background-color: #8e44ad;
+                color: white;
+                min-width: 75px;
+                min-height: 32px;
+            }
+            QPushButton:hover {
+                background-color: #7d3c98;
+                border: 2px solid #6c3483;
+            }
+            QPushButton:checked {
+                background-color: #6c3483;
+                border: 2px solid #5b2c6f;
+                font-weight: bold;
+            }
+            QPushButton:pressed {
+                background-color: #5b2c6f;
+            }
+        """)
+        self.toolbar_overlay_button.clicked.connect(self.on_overlay_toggled)
+        overlay_section_layout.addWidget(self.toolbar_overlay_button)
         
-        # Store toolbar overlay action too
-        self.toolbar_overlay_action = overlay_toggle_action
+        toolbar_layout.addWidget(overlay_section)
+        
+        # Add stretch to push everything to the left
+        toolbar_layout.addStretch()
+        
+        # Set the toolbar widget as the main toolbar
+        self.setMenuWidget(toolbar_widget)
+        
+        # Store reference for overlay synchronization
+        self.toolbar_overlay_action = self.toolbar_overlay_button
+    
+    def _create_toolbar_section(self, title, buttons):
+        """Create a toolbar section with title and buttons."""
+        section_widget = QWidget()
+        section_widget.setStyleSheet("""
+            QWidget {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+        
+        section_layout = QVBoxLayout(section_widget)
+        section_layout.setContentsMargins(0, 0, 0, 0)
+        section_layout.setSpacing(3)  # Leggermente aumentato da 2 a 3
+        
+        # Section title
+        title_label = QLabel(title)
+        title_label.setStyleSheet("""
+            QLabel {
+                font-size: 9px;
+                font-weight: bold;
+                color: palette(mid);
+                text-align: center;
+                margin: 0px;
+                padding: 0px 2px;
+            }
+        """)
+        title_label.setAlignment(Qt.AlignCenter)
+        section_layout.addWidget(title_label)
+        
+        # Buttons container
+        buttons_widget = QWidget()
+        buttons_layout = QHBoxLayout(buttons_widget)
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
+        buttons_layout.setSpacing(8)  # Leggermente aumentato da 6 a 8
+        
+        # Create buttons
+        for text, tooltip, callback, color in buttons:
+            button = QPushButton(text)
+            button.setToolTip(tooltip)
+            button.setStyleSheet(f"""
+                QPushButton {{
+                    padding: 6px 14px;
+                    border: 1px solid palette(mid);
+                    border-radius: 4px;
+                    font-size: 11px;
+                    font-weight: bold;
+                    background-color: {color};
+                    color: white;
+                    min-width: 75px;
+                    min-height: 32px;
+                }}
+                QPushButton:hover {{
+                    background-color: {self._darken_color(color, 0.1)};
+                    border: 2px solid {self._darken_color(color, 0.2)};
+                }}
+                QPushButton:pressed {{
+                    background-color: {self._darken_color(color, 0.2)};
+                }}
+            """)
+            button.clicked.connect(callback)
+            buttons_layout.addWidget(button)
+        
+        section_layout.addWidget(buttons_widget)
+        return section_widget
+    
+    def _create_toolbar_separator(self):
+        """Create a vertical separator for the toolbar."""
+        separator = QFrame()
+        separator.setFrameShape(QFrame.VLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        separator.setStyleSheet("""
+            QFrame {
+                color: palette(mid);
+                background-color: palette(mid);
+                margin: 6px 0px;
+            }
+        """)
+        separator.setFixedWidth(2)
+        return separator
+    
+    def _darken_color(self, hex_color, factor):
+        """Darken a hex color by a factor (0.0 to 1.0)."""
+        # Remove the # if present
+        hex_color = hex_color.lstrip('#')
+        
+        # Convert to RGB
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        
+        # Darken
+        r = int(r * (1 - factor))
+        g = int(g * (1 - factor))
+        b = int(b * (1 - factor))
+        
+        return f"#{r:02x}{g:02x}{b:02x}"
 
     def _setup_main_layout(self):
         """Setup the main application layout with image views and controls."""
@@ -692,7 +831,7 @@ class ThermalAnalyzerNG(QMainWindow):
         """Setup the sidebar with parameters, ROI analysis, and batch processing tabs."""
         self.sidebar_tabs = QTabWidget()
         self.sidebar_tabs.setTabPosition(QTabWidget.East)
-        self.sidebar_tabs.setMinimumWidth(400)
+        self.sidebar_tabs.setMinimumWidth(350)  # Reduced from 400 to 350
         self.main_layout.addWidget(self.sidebar_tabs, stretch=2)
         
         self._setup_parameters_tab()
@@ -701,38 +840,206 @@ class ThermalAnalyzerNG(QMainWindow):
         self._setup_batch_export_tab()
 
     def _setup_overlay_tab(self):
-        """Setup the overlay controls tab."""
+        """Setup the overlay controls tab with consistent styling and hierarchy."""
         self.tab_overlay = QWidget()
         self.tab_overlay_layout = QVBoxLayout(self.tab_overlay)
-        self.tab_overlay_layout.setContentsMargins(16, 16, 16, 16)
-        self.tab_overlay_layout.setSpacing(12)
+        self.tab_overlay_layout.setContentsMargins(20, 20, 20, 20)  # Consistent with parameters tab
+        self.tab_overlay_layout.setSpacing(16)  # Consistent spacing
         
-        # Overlay toggle group
-        self.overlay_groupbox = QGroupBox("Overlay Mode")
-        self.overlay_layout = QFormLayout(self.overlay_groupbox)
+        # Create a scroll area for all content (consistent with parameters tab)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(20)
+        
+        # === OVERLAY CONTROLS SECTION ===
+        self._setup_overlay_controls_section(scroll_layout)
+        
+        # === ALIGNMENT CONTROLS SECTION ===
+        self._setup_alignment_controls_section(scroll_layout)
+        
+        # === BLEND MODE SECTION ===
+        self._setup_blend_mode_section(scroll_layout)
+        
+        # Add stretch to push everything to the top
+        scroll_layout.addStretch()
+        
+        scroll_area.setWidget(scroll_content)
+        self.tab_overlay_layout.addWidget(scroll_area)
+        
+        self.sidebar_tabs.addTab(self.tab_overlay, "Overlay")
+    
+    def _setup_overlay_controls_section(self, parent_layout):
+        """Setup the overlay control section with consistent styling."""
+        # Main overlay controls group
+        self.overlay_groupbox = QGroupBox("Overlay Controls")
+        self.overlay_groupbox.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        overlay_main_layout = QVBoxLayout(self.overlay_groupbox)
+        overlay_main_layout.setContentsMargins(16, 20, 16, 16)
+        overlay_main_layout.setSpacing(16)
+        
+        # Overlay mode sub-group
+        overlay_mode_group = QGroupBox("Mode Settings")
+        overlay_mode_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        overlay_mode_layout = QFormLayout(overlay_mode_group)
+        overlay_mode_layout.setContentsMargins(12, 16, 12, 12)
+        overlay_mode_layout.setVerticalSpacing(10)
+        overlay_mode_layout.setHorizontalSpacing(12)
         
         # Overlay toggle checkbox
         self.overlay_checkbox = QCheckBox("Enable Overlay")
+        self.overlay_checkbox.setStyleSheet("""
+            QCheckBox {
+                font-size: 11px;
+                padding: 4px;
+            }
+        """)
         self.overlay_checkbox.toggled.connect(self.on_overlay_toggled)
-        self.overlay_layout.addRow("", self.overlay_checkbox)
+        overlay_mode_layout.addRow("", self.overlay_checkbox)
+        
+        # Opacity control sub-group
+        opacity_group = QGroupBox("Opacity Control")
+        opacity_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        opacity_layout = QFormLayout(opacity_group)
+        opacity_layout.setContentsMargins(12, 16, 12, 12)
+        opacity_layout.setVerticalSpacing(10)
+        opacity_layout.setHorizontalSpacing(12)
         
         # Opacity slider
         self.overlay_alpha_label = QLabel("Opacity: 50%")
+        self.overlay_alpha_label.setStyleSheet("font-size: 11px; font-weight: bold;")
         self.overlay_alpha_slider = QSlider(Qt.Horizontal)
         self.overlay_alpha_slider.setMinimum(0)
         self.overlay_alpha_slider.setMaximum(100)
         self.overlay_alpha_slider.setValue(50)
+        self.overlay_alpha_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #999999;
+                height: 4px;
+                background: #ffffff;
+                margin: 2px 0;
+            }
+            QSlider::handle:horizontal {
+                background: #ffffff;
+                border: 1px solid #999999;
+                width: 18px;
+                height: 18px;
+                margin: -7px 0;
+                border-radius: 9px;
+            }
+            QSlider::handle:horizontal:hover {
+                border: 1px solid #666666;
+            }
+            QSlider::handle:horizontal:pressed {
+                background: #f0f0f0;
+            }
+        """)
         self.overlay_alpha_slider.valueChanged.connect(self.on_overlay_alpha_changed)
         self.overlay_alpha_slider.valueChanged.connect(
             lambda v: self.overlay_alpha_label.setText(f"Opacity: {v}%")
         )
-        self.overlay_layout.addRow(self.overlay_alpha_label, self.overlay_alpha_slider)
+        opacity_layout.addRow(self.overlay_alpha_label, self.overlay_alpha_slider)
         
-        self.tab_overlay_layout.addWidget(self.overlay_groupbox)
+        # Add sub-groups to main layout
+        overlay_main_layout.addWidget(overlay_mode_group)
+        overlay_main_layout.addWidget(opacity_group)
         
-        # Alignment controls group
+        parent_layout.addWidget(self.overlay_groupbox)
+    
+    def _setup_alignment_controls_section(self, parent_layout):
+        """Setup the alignment controls section with consistent styling."""
+        # Main alignment controls group
         self.alignment_groupbox = QGroupBox("Alignment Controls")
-        self.alignment_layout = QFormLayout(self.alignment_groupbox)
+        self.alignment_groupbox.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        alignment_main_layout = QVBoxLayout(self.alignment_groupbox)
+        alignment_main_layout.setContentsMargins(16, 20, 16, 16)
+        alignment_main_layout.setSpacing(16)
+        
+        # Transform controls sub-group
+        transform_group = QGroupBox("Transform Settings")
+        transform_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        transform_layout = QFormLayout(transform_group)
+        transform_layout.setContentsMargins(12, 16, 12, 12)
+        transform_layout.setVerticalSpacing(10)
+        transform_layout.setHorizontalSpacing(12)
         
         # Scale control
         self.scale_spin = QDoubleSpinBox()
@@ -741,49 +1048,189 @@ class ThermalAnalyzerNG(QMainWindow):
         self.scale_spin.setSingleStep(0.01)
         self.scale_spin.setDecimals(3)
         self.scale_spin.setValue(1.0)
+        self.scale_spin.setStyleSheet("""
+            QDoubleSpinBox {
+                padding: 6px 8px;
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QDoubleSpinBox:focus {
+                border: 2px solid palette(highlight);
+            }
+        """)
         self.scale_spin.valueChanged.connect(self.on_scale_spin_changed)
-        self.alignment_layout.addRow("Scale Factor:", self.scale_spin)
+        transform_layout.addRow("Scale Factor:", self.scale_spin)
         
         # X offset control
         self.offsetx_spin = QSpinBox()
         self.offsetx_spin.setMinimum(-1000)
         self.offsetx_spin.setMaximum(1000)
         self.offsetx_spin.setValue(0)
+        self.offsetx_spin.setStyleSheet("""
+            QSpinBox {
+                padding: 6px 8px;
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QSpinBox:focus {
+                border: 2px solid palette(highlight);
+            }
+        """)
         self.offsetx_spin.valueChanged.connect(self.on_offsetx_changed)
-        self.alignment_layout.addRow("X Offset (px):", self.offsetx_spin)
+        transform_layout.addRow("X Offset (px):", self.offsetx_spin)
         
         # Y offset control
         self.offsety_spin = QSpinBox()
         self.offsety_spin.setMinimum(-1000)
         self.offsety_spin.setMaximum(1000)
         self.offsety_spin.setValue(0)
+        self.offsety_spin.setStyleSheet("""
+            QSpinBox {
+                padding: 6px 8px;
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QSpinBox:focus {
+                border: 2px solid palette(highlight);
+            }
+        """)
         self.offsety_spin.valueChanged.connect(self.on_offsety_changed)
-        self.alignment_layout.addRow("Y Offset (px):", self.offsety_spin)
+        transform_layout.addRow("Y Offset (px):", self.offsety_spin)
+        
+        # Actions sub-group
+        actions_group = QGroupBox("Quick Actions")
+        actions_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        actions_layout = QFormLayout(actions_group)
+        actions_layout.setContentsMargins(12, 16, 12, 12)
+        actions_layout.setVerticalSpacing(10)
+        actions_layout.setHorizontalSpacing(12)
         
         # Reset alignment button
         self.reset_alignment_button = QPushButton("Reset to Metadata")
+        self.reset_alignment_button.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+                background-color: palette(button);
+            }
+            QPushButton:hover {
+                background-color: palette(light);
+                border: 2px solid palette(highlight);
+            }
+            QPushButton:pressed {
+                background-color: palette(mid);
+            }
+        """)
         self.reset_alignment_button.clicked.connect(self.on_reset_alignment)
-        self.alignment_layout.addRow("", self.reset_alignment_button)
+        actions_layout.addRow("", self.reset_alignment_button)
         
-        self.tab_overlay_layout.addWidget(self.alignment_groupbox)
+        # Add sub-groups to main layout
+        alignment_main_layout.addWidget(transform_group)
+        alignment_main_layout.addWidget(actions_group)
         
-        # Blend mode group
+        parent_layout.addWidget(self.alignment_groupbox)
+    
+    def _setup_blend_mode_section(self, parent_layout):
+        """Setup the blend mode section with consistent styling."""
+        # Main blend mode group
         self.blend_groupbox = QGroupBox("Blend Mode")
-        self.blend_layout = QFormLayout(self.blend_groupbox)
+        self.blend_groupbox.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        blend_main_layout = QVBoxLayout(self.blend_groupbox)
+        blend_main_layout.setContentsMargins(16, 20, 16, 16)
+        blend_main_layout.setSpacing(16)
+        
+        # Blend selection sub-group
+        blend_selection_group = QGroupBox("Mode Selection")
+        blend_selection_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        blend_selection_layout = QFormLayout(blend_selection_group)
+        blend_selection_layout.setContentsMargins(12, 16, 12, 12)
+        blend_selection_layout.setVerticalSpacing(10)
+        blend_selection_layout.setHorizontalSpacing(12)
         
         # Blend mode combo
         self.blend_combo = QComboBox()
         blend_modes = ["Normal", "Multiply", "Screen", "Overlay", "Difference", "HardLight"]
         self.blend_combo.addItems(blend_modes)
+        self.blend_combo.setStyleSheet("""
+            QComboBox {
+                padding: 6px 8px;
+                border: 1px solid palette(mid);
+                border-radius: 4px;
+                font-size: 11px;
+                min-width: 120px;
+            }
+            QComboBox:focus {
+                border: 2px solid palette(highlight);
+            }
+            QComboBox::drop-down {
+                border-left: 1px solid palette(mid);
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                width: 0;
+                height: 0;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid palette(text);
+            }
+        """)
         self.blend_combo.currentTextChanged.connect(self.on_blend_mode_changed)
-        self.blend_layout.addRow("Blend Mode:", self.blend_combo)
+        blend_selection_layout.addRow("Blend Mode:", self.blend_combo)
         
-        self.tab_overlay_layout.addWidget(self.blend_groupbox)
+        # Add sub-group to main layout
+        blend_main_layout.addWidget(blend_selection_group)
         
-        # Add stretch to push everything to top
-        self.tab_overlay_layout.addStretch()
-        
-        self.sidebar_tabs.addTab(self.tab_overlay, "Overlay")
+        parent_layout.addWidget(self.blend_groupbox)
         
     def _setup_parameters_tab(self):
         """Setup the thermal parameters configuration tab."""
@@ -1139,7 +1586,7 @@ class ThermalAnalyzerNG(QMainWindow):
         
         # Min temperature
         min_label = QLabel("Min:")
-        min_label.setStyleSheet("font-size: 12px; font-weight: bold; color: black; border: 0px solid black;")
+        min_label.setStyleSheet("font-size: 12px; font-weight: bold; border: 0px solid black;")
         self.temp_min_spin = QDoubleSpinBox()
         self.temp_min_spin.setRange(-273.15, 1000.0)
         self.temp_min_spin.setDecimals(2)
@@ -1158,7 +1605,7 @@ class ThermalAnalyzerNG(QMainWindow):
         
         # Max temperature
         max_label = QLabel("Max:")
-        max_label.setStyleSheet("font-size: 12px; font-weight: bold; color: black; border: 0px solid black;")
+        max_label.setStyleSheet("font-size: 12px; font-weight: bold;  border: none;")
         self.temp_max_spin = QDoubleSpinBox()
         self.temp_max_spin.setRange(-273.15, 1000.0)
         self.temp_max_spin.setDecimals(2)
@@ -1260,95 +1707,394 @@ class ThermalAnalyzerNG(QMainWindow):
     def _setup_roi_analysis_tab(self):
         """Setup the ROI (Region of Interest) analysis tab."""
         self.tab_areas = QWidget()
+        self.tab_areas.setMinimumWidth(300)  # Minimum width for responsive behavior
         self.tab_areas_layout = QVBoxLayout(self.tab_areas)
-        self.tab_areas_layout.setContentsMargins(16, 16, 16, 16)
-        self.tab_areas_layout.setSpacing(12)
+        self.tab_areas_layout.setContentsMargins(20, 20, 20, 20)
+        self.tab_areas_layout.setSpacing(16)
         
-        # ROI creation tools
-        self._setup_roi_tools()
+        # Create a scroll area for all content
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
-        # ROI analysis table
-        self._setup_roi_table()
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(20)
         
-        # ROI label settings
-        self._setup_roi_label_settings()
+        # === ROI CREATION TOOLS SECTION ===
+        self._setup_roi_tools_section(scroll_layout)
+        
+        # === ROI ANALYSIS TABLE SECTION ===
+        self._setup_roi_analysis_section(scroll_layout)
+        
+        # Add stretch to push everything to the top
+        scroll_layout.addStretch()
+        
+        scroll_area.setWidget(scroll_content)
+        self.tab_areas_layout.addWidget(scroll_area)
         
         self.sidebar_tabs.addTab(self.tab_areas, "Areas & Analysis")
         
-    def _setup_roi_tools(self):
-        """Setup ROI creation tool buttons."""
-        self.areas_tools_widget = QWidget()
-        _areas_tools = QHBoxLayout(self.areas_tools_widget)
-        _areas_tools.setContentsMargins(0, 0, 0, 0)
-        _areas_tools.setSpacing(12)
+    def _setup_roi_tools_section(self, parent_layout):
+        """Setup the ROI creation tools section with consistent styling."""
+        roi_tools_groupbox = QGroupBox("ROI Creation Tools")
+        roi_tools_groupbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        roi_tools_groupbox.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        tools_main_layout = QVBoxLayout(roi_tools_groupbox)
+        tools_main_layout.setContentsMargins(16, 20, 16, 16)
+        tools_main_layout.setSpacing(12)
+        
+        # Tool buttons container with responsive design
+        tools_container = QWidget()
+        tools_container.setMinimumHeight(50)
+        tools_layout = QGridLayout(tools_container)
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+        tools_layout.setSpacing(12)
 
-        # Tool buttons
+        # Tool buttons with consistent styling and responsive behavior
         self.btn_spot = QPushButton("Spot")
         self.btn_rect = QPushButton("Rectangle")
         self.btn_poly = QPushButton("Polygon")
         
-        # Make buttons checkable for toggle behavior
-        self.btn_spot.setCheckable(True)
-        self.btn_rect.setCheckable(True)
-        self.btn_poly.setCheckable(True)
+        # Base button styling consistent with control buttons
+        base_tool_button_style = """
+            QPushButton {
+                padding: 8px 16px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+                min-width: 80px;
+                max-width: 150px;
+                color: white;
+            }
+            QPushButton:pressed {
+                background-color: palette(mid);
+            }
+        """
+        
+        # Apply styling and make buttons checkable with size policies
+        buttons = [self.btn_spot, self.btn_rect, self.btn_poly]
+        for btn in buttons:
+            btn.setCheckable(True)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        
+        # Spot button - Blue color scheme
+        self.btn_spot.setStyleSheet(base_tool_button_style + """
+            QPushButton {
+                background-color: #3498db;
+                border: 1px solid #2980b9;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+                border: 2px solid #1f618d;
+            }
+            QPushButton:checked {
+                background-color: #1f618d;
+                border: 2px solid #154360;
+            }
+        """)
+        
+        # Rectangle button - Green color scheme
+        self.btn_rect.setStyleSheet(base_tool_button_style + """
+            QPushButton {
+                background-color: #27ae60;
+                border: 1px solid #229954;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+                border: 2px solid #1e8449;
+            }
+            QPushButton:checked {
+                background-color: #1e8449;
+                border: 2px solid #186a3b;
+            }
+        """)
+        
+        # Polygon button - Purple color scheme
+        self.btn_poly.setStyleSheet(base_tool_button_style + """
+            QPushButton {
+                background-color: #8e44ad;
+                border: 1px solid #7d3c98;
+            }
+            QPushButton:hover {
+                background-color: #7d3c98;
+                border: 2px solid #6c3483;
+            }
+            QPushButton:checked {
+                background-color: #6c3483;
+                border: 2px solid #5b2c6f;
+            }
+        """)
         
         # Connect button signals
         self.btn_rect.clicked.connect(self.activate_rect_tool)
         self.btn_spot.clicked.connect(self.activate_spot_tool)
         self.btn_poly.clicked.connect(self.activate_polygon_tool)
         
-        _areas_tools.addWidget(self.btn_spot)
-        _areas_tools.addWidget(self.btn_rect)
-        _areas_tools.addWidget(self.btn_poly)
-        _areas_tools.addStretch(1)
+        # Responsive grid layout - buttons will wrap to new row if needed
+        tools_layout.addWidget(self.btn_spot, 0, 0)
+        tools_layout.addWidget(self.btn_rect, 0, 1)
+        tools_layout.addWidget(self.btn_poly, 0, 2)
         
-        self.tab_areas_layout.addWidget(self.areas_tools_widget)
+        # Set column stretch to make buttons responsive
+        tools_layout.setColumnStretch(0, 1)
+        tools_layout.setColumnStretch(1, 1)
+        tools_layout.setColumnStretch(2, 1)
         
-    def _setup_roi_table(self):
-        """Setup the ROI analysis results table."""
-        self.roi_table_group = QGroupBox("ROI Analysis")
-        self.roi_table_layout = QVBoxLayout(self.roi_table_group)
+        tools_main_layout.addWidget(tools_container)
+        parent_layout.addWidget(roi_tools_groupbox)
         
-        # Create table
+    def _setup_roi_analysis_section(self, parent_layout):
+        """Setup the ROI analysis results section with improved styling."""
+        roi_analysis_groupbox = QGroupBox("ROI Analysis & Results")
+        roi_analysis_groupbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        roi_analysis_groupbox.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        analysis_main_layout = QVBoxLayout(roi_analysis_groupbox)
+        analysis_main_layout.setContentsMargins(16, 20, 16, 16)
+        analysis_main_layout.setSpacing(16)
+        
+        # Results table section
+        table_section = QGroupBox("Analysis Results")
+        table_section.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        table_layout = QVBoxLayout(table_section)
+        table_layout.setContentsMargins(12, 16, 12, 12)
+        table_layout.setSpacing(12)
+        
+        # Create responsive table with scroll area
+        table_scroll_area = QScrollArea()
+        table_scroll_area.setWidgetResizable(True)
+        table_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        table_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table_scroll_area.setFrameShape(QFrame.NoFrame)
+        table_scroll_area.setMinimumHeight(200)
+        table_scroll_area.setMaximumHeight(400)
+        
+        # Create table with enhanced styling and responsive behavior
         self.roi_table = QTableWidget()
         self.roi_table.setColumnCount(6)
         headers = ["Name", "Emissivity", "Min (°C)", "Max (°C)", "Mean (°C)", "Median (°C)"]
         self.roi_table.setHorizontalHeaderLabels(headers)
         self.roi_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.roi_table.setSelectionMode(QTableWidget.MultiSelection) 
-        self.roi_table.setAlternatingRowColors(True)
+        self.roi_table.setAlternatingRowColors(False)  # Disable alternating row colors
         self.roi_table.setSortingEnabled(False)
+        self.roi_table.setMinimumWidth(400)  # Reduced from 500 to 400
+        self.roi_table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                gridline-color: palette(mid);
+                font-size: 11px;
+                background-color: palette(base);
+                color: palette(text);
+            }
+            QTableWidget::item {
+                padding: 6px 8px;
+                border: none;
+                min-height: 20px;
+                color: palette(text);
+            }
+            QTableWidget::item:selected {
+                background-color: palette(highlight);
+                color: palette(highlighted-text);
+            }
+            QTableWidget::item:hover {
+                background-color: palette(midlight);
+            }
+            QHeaderView::section {
+                background-color: palette(button);
+                color: palette(button-text);
+                padding: 8px;
+                border: none;
+                border-bottom: 1px solid palette(mid);
+                font-weight: bold;
+                font-size: 10px;
+                min-width: 60px;
+            }
+        """)
         
-        # Configure column sizing
+        # Configure responsive column sizing
         header = self.roi_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for i in range(1, 6):
-            header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name column stretches
+        header.setSectionResizeMode(1, QHeaderView.Fixed)    # Emissivity fixed
+        header.setSectionResizeMode(2, QHeaderView.Fixed)    # Min fixed
+        header.setSectionResizeMode(3, QHeaderView.Fixed)    # Max fixed
+        header.setSectionResizeMode(4, QHeaderView.Fixed)    # Mean fixed
+        header.setSectionResizeMode(5, QHeaderView.Fixed)    # Median fixed
+        
+        # Set minimum column widths for responsive behavior
+        self.roi_table.setColumnWidth(1, 80)  # Emissivity
+        self.roi_table.setColumnWidth(2, 80)  # Min
+        self.roi_table.setColumnWidth(3, 80)  # Max
+        self.roi_table.setColumnWidth(4, 80)  # Mean
+        self.roi_table.setColumnWidth(5, 80)  # Median
+        
+        # Set the table as the scroll area widget
+        table_scroll_area.setWidget(self.roi_table)
         
         # Connect table signals
         self.roi_table.itemSelectionChanged.connect(self.on_roi_table_selection_changed)
         self.roi_table.itemChanged.connect(self.on_roi_table_item_changed)
         
-        self.roi_table_layout.addWidget(self.roi_table)
+        table_layout.addWidget(table_scroll_area)
         
-        # ROI control buttons
-        roi_controls_layout = QHBoxLayout()
+        # ROI control buttons with responsive layout
+        controls_container = QWidget()
+        roi_controls_layout = QGridLayout(controls_container)
+        roi_controls_layout.setContentsMargins(0, 8, 0, 0)
+        roi_controls_layout.setSpacing(12)
+        
+        control_button_style = """
+            QPushButton {
+                padding: 8px 16px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+                min-width: 100px;
+                max-width: 200px;
+            }
+            QPushButton:hover {
+                border: 2px solid palette(highlight);
+            }
+            QPushButton:pressed {
+                background-color: palette(mid);
+            }
+        """
+        
         self.btn_delete_roi = QPushButton("Delete ROI")
+        self.btn_delete_roi.setStyleSheet(control_button_style + """
+            QPushButton {
+                background-color: #e74c3c;
+                color: white;
+                border: 1px solid #c0392b;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+                border: 2px solid #a93226;
+            }
+        """)
+        self.btn_delete_roi.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.btn_delete_roi.clicked.connect(self.delete_selected_roi)
+        
         self.btn_clear_all_roi = QPushButton("Clear All ROIs")
+        self.btn_clear_all_roi.setStyleSheet(control_button_style + """
+            QPushButton {
+                background-color: #f39c12;
+                color: white;
+                border: 1px solid #e67e22;
+            }
+            QPushButton:hover {
+                background-color: #e67e22;
+                border: 2px solid #d35400;
+            }
+        """)
+        self.btn_clear_all_roi.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.btn_clear_all_roi.clicked.connect(self.clear_all_rois)
         
-        roi_controls_layout.addWidget(self.btn_delete_roi)
-        roi_controls_layout.addWidget(self.btn_clear_all_roi)
-        roi_controls_layout.addStretch()
-        self.roi_table_layout.addLayout(roi_controls_layout)
+        # Responsive button layout
+        roi_controls_layout.addWidget(self.btn_delete_roi, 0, 0)
+        roi_controls_layout.addWidget(self.btn_clear_all_roi, 0, 1)
+        roi_controls_layout.setColumnStretch(0, 1)
+        roi_controls_layout.setColumnStretch(1, 1)
         
-        self.tab_areas_layout.addWidget(self.roi_table_group)
+        table_layout.addWidget(controls_container)
         
-    def _setup_roi_label_settings(self):
-        """Setup ROI label display settings checkboxes."""
-        label_opts_layout = QHBoxLayout()
-        label_opts_layout.addWidget(QLabel("Show in labels:"))
+        analysis_main_layout.addWidget(table_section)
+        
+        # Label settings section
+        self._setup_roi_label_settings_section(analysis_main_layout)
+        
+        parent_layout.addWidget(roi_analysis_groupbox)
+        
+    def _setup_roi_label_settings_section(self, parent_layout):
+        """Setup ROI label display settings section with consistent styling."""
+        label_settings_section = QGroupBox("Label Display Settings")
+        label_settings_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        label_settings_section.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        
+        label_layout = QVBoxLayout(label_settings_section)
+        label_layout.setContentsMargins(12, 16, 12, 12)
+        label_layout.setSpacing(12)
+        
+        # Description text
+        description_label = QLabel("Select which information to display in ROI labels:")
+        description_label.setStyleSheet("""
+            QLabel {
+                font-size: 10px;
+                color: palette(dark);
+                margin-bottom: 4px;
+            }
+        """)
+        label_layout.addWidget(description_label)
+        
+        # Responsive checkbox container
+        checkbox_container = QWidget()
+        label_opts_layout = QGridLayout(checkbox_container)
+        label_opts_layout.setContentsMargins(0, 0, 0, 0)
+        label_opts_layout.setSpacing(12)
 
         # Default label settings
         self.roi_label_settings = {
@@ -1360,7 +2106,14 @@ class ThermalAnalyzerNG(QMainWindow):
             "median": False,
         }
 
-        # Create checkboxes for label options
+        # Create checkboxes with simplified styling
+        checkbox_style = """
+            QCheckBox {
+                font-size: 11px;
+                spacing: 6px;
+            }
+        """
+        
         self.cb_label_name = QCheckBox("Name")
         self.cb_label_eps = QCheckBox("ε")
         self.cb_label_min = QCheckBox("Min")
@@ -1368,114 +2121,474 @@ class ThermalAnalyzerNG(QMainWindow):
         self.cb_label_avg = QCheckBox("Mean")
         self.cb_label_med = QCheckBox("Median")
         
-        # Set initial states
-        self.cb_label_name.setChecked(self.roi_label_settings["name"])
-        self.cb_label_eps.setChecked(self.roi_label_settings["emissivity"])
-        self.cb_label_min.setChecked(self.roi_label_settings["min"])
-        self.cb_label_max.setChecked(self.roi_label_settings["max"])
-        self.cb_label_avg.setChecked(self.roi_label_settings["avg"])
-        self.cb_label_med.setChecked(self.roi_label_settings["median"])
+        # Apply styling and set initial states with size policies
+        checkboxes = [self.cb_label_name, self.cb_label_eps, self.cb_label_min,
+                     self.cb_label_max, self.cb_label_avg, self.cb_label_med]
+        
+        checkbox_keys = ["name", "emissivity", "min", "max", "avg", "median"]
+        
+        for checkbox, key in zip(checkboxes, checkbox_keys):
+            checkbox.setStyleSheet(checkbox_style)
+            checkbox.setChecked(self.roi_label_settings[key])
+            checkbox.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            checkbox.toggled.connect(self.on_label_settings_changed)
 
-        # Connect signals
-        for cb in [self.cb_label_name, self.cb_label_eps, self.cb_label_min,
-                   self.cb_label_max, self.cb_label_avg, self.cb_label_med]:
-            cb.toggled.connect(self.on_label_settings_changed)
-            label_opts_layout.addWidget(cb)
+        # Responsive grid layout for checkboxes (3 columns, 2 rows if needed)
+        label_opts_layout.addWidget(self.cb_label_name, 0, 0)
+        label_opts_layout.addWidget(self.cb_label_eps, 0, 1)
+        label_opts_layout.addWidget(self.cb_label_min, 0, 2)
+        label_opts_layout.addWidget(self.cb_label_max, 1, 0)
+        label_opts_layout.addWidget(self.cb_label_avg, 1, 1)
+        label_opts_layout.addWidget(self.cb_label_med, 1, 2)
+        
+        # Set column stretch for responsive behavior
+        label_opts_layout.setColumnStretch(0, 1)
+        label_opts_layout.setColumnStretch(1, 1)
+        label_opts_layout.setColumnStretch(2, 1)
 
-        label_opts_layout.addStretch()
-        self.roi_table_layout.addLayout(label_opts_layout)
+        label_layout.addWidget(checkbox_container)
+        parent_layout.addWidget(label_settings_section)
         
     def _setup_batch_export_tab(self):
-        """Setup the enhanced batch processing and export tab."""
+        """Setup the enhanced batch processing and export tab with consistent styling."""
         self.tab_batch = QWidget()
         self.tab_batch_layout = QVBoxLayout(self.tab_batch)
-        self.tab_batch_layout.setContentsMargins(16, 16, 16, 16)
-        self.tab_batch_layout.setSpacing(12)
+        self.tab_batch_layout.setContentsMargins(20, 20, 20, 20)  # Consistent with parameters tab
+        self.tab_batch_layout.setSpacing(16)  # Consistent spacing
         
-        # Export section (unchanged)
-        export_group = QGroupBox("Export")
-        export_layout = QVBoxLayout(export_group)
+        # Create a scroll area for all content (consistent with parameters tab)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
-        self.btn_export_current = QPushButton("Export Current Analysis")
-
-        export_layout.addWidget(self.btn_export_current)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(20)
         
-        self.tab_batch_layout.addWidget(export_group)
+        # === EXPORT SECTION ===
+        self._setup_export_section(scroll_layout)
+        
+        # === PRESET CONFIGURATION SECTION ===
+        self._setup_preset_configuration_section(scroll_layout)
+        
+        # === BATCH PROCESSING SECTION ===
+        self._setup_batch_processing_section(scroll_layout)
+        
+        # Add stretch to push everything to the top
+        scroll_layout.addStretch()
+        
+        scroll_area.setWidget(scroll_content)
+        self.tab_batch_layout.addWidget(scroll_area)
+        
         self.sidebar_tabs.addTab(self.tab_batch, "Export")
 
-        # Preset Configuration Section
+        # Initialize batch processing data
+        self.batch_images = []
+        self.preset_data = None
+    
+    def _setup_export_section(self, parent_layout):
+        """Setup the export section with consistent styling."""
+        # Main export group
+        export_group = QGroupBox("Data Export")
+        export_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        export_main_layout = QVBoxLayout(export_group)
+        export_main_layout.setContentsMargins(16, 20, 16, 16)
+        export_main_layout.setSpacing(16)
+        
+        # Current analysis export sub-group
+        current_export_group = QGroupBox("Current Analysis")
+        current_export_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        current_export_layout = QVBoxLayout(current_export_group)
+        current_export_layout.setContentsMargins(12, 16, 12, 12)
+        current_export_layout.setSpacing(12)
+        
+        self.btn_export_current = QPushButton("Export Current Analysis")
+        self.btn_export_current.setStyleSheet("""
+            QPushButton {
+                padding: 10px 16px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+                background-color: #2ecc71;
+                color: white;
+                min-height: 24px;
+            }
+            QPushButton:hover {
+                background-color: #27ae60;
+                border: 2px solid #229954;
+            }
+            QPushButton:pressed {
+                background-color: #229954;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+                color: #7f8c8d;
+                border: 1px solid #95a5a6;
+            }
+        """)
+        current_export_layout.addWidget(self.btn_export_current)
+        
+        # Add sub-group to main layout
+        export_main_layout.addWidget(current_export_group)
+        
+        parent_layout.addWidget(export_group)
+    
+    def _setup_preset_configuration_section(self, parent_layout):
+        """Setup the preset configuration section with consistent styling."""
+        # Main preset configuration group
         preset_group = QGroupBox("Preset Configuration")
-        preset_layout = QVBoxLayout(preset_group)
+        preset_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        preset_main_layout = QVBoxLayout(preset_group)
+        preset_main_layout.setContentsMargins(16, 20, 16, 16)
+        preset_main_layout.setSpacing(16)
+        
+        # Preset loading sub-group
+        preset_loading_group = QGroupBox("Preset Management")
+        preset_loading_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        preset_loading_layout = QVBoxLayout(preset_loading_group)
+        preset_loading_layout.setContentsMargins(12, 16, 12, 12)
+        preset_loading_layout.setSpacing(12)
         
         # Preset loading section
         preset_controls_layout = QHBoxLayout()
         self.preset_file_label = QLabel("No preset loaded")
-        self.preset_file_label.setStyleSheet("color: #888; font-style: italic;")
+        self.preset_file_label.setStyleSheet("""
+            QLabel {
+                color: #888; 
+                font-style: italic;
+                font-size: 11px;
+                padding: 4px;
+            }
+        """)
         self.btn_load_preset = QPushButton("Load Preset JSON")
+        self.btn_load_preset.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+                background-color: #3498db;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+                border: 2px solid #1f618d;
+            }
+            QPushButton:pressed {
+                background-color: #1f618d;
+            }
+        """)
         
         preset_controls_layout.addWidget(self.preset_file_label)
         preset_controls_layout.addStretch()
         preset_controls_layout.addWidget(self.btn_load_preset)
-        preset_layout.addLayout(preset_controls_layout)
+        preset_loading_layout.addLayout(preset_controls_layout)
+        
+        # Preset options sub-group
+        preset_options_group = QGroupBox("Apply Options")
+        preset_options_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        preset_options_layout = QVBoxLayout(preset_options_group)
+        preset_options_layout.setContentsMargins(12, 16, 12, 12)
+        preset_options_layout.setSpacing(8)
         
         # Preset options
         self.cb_thermal_params = QCheckBox("Apply Thermal Parameters")
+        self.cb_thermal_params.setStyleSheet("""
+            QCheckBox {
+                font-size: 11px;
+                padding: 4px;
+            }
+        """)
         self.cb_analysis_areas = QCheckBox("Apply Analysis Areas (ROIs)")
+        self.cb_analysis_areas.setStyleSheet("""
+            QCheckBox {
+                font-size: 11px;
+                padding: 4px;
+            }
+        """)
         
         self.cb_thermal_params.setChecked(True)
         self.cb_analysis_areas.setChecked(True)
         
-        preset_layout.addWidget(self.cb_thermal_params)
-        preset_layout.addWidget(self.cb_analysis_areas)
+        preset_options_layout.addWidget(self.cb_thermal_params)
+        preset_options_layout.addWidget(self.cb_analysis_areas)
         
-        self.tab_batch_layout.addWidget(preset_group)
+        # Add sub-groups to main layout
+        preset_main_layout.addWidget(preset_loading_group)
+        preset_main_layout.addWidget(preset_options_group)
         
-        # Batch Images Section
-        batch_group = QGroupBox("Batch Export")
-        batch_layout = QVBoxLayout(batch_group)
+        parent_layout.addWidget(preset_group)
+    
+    def _setup_batch_processing_section(self, parent_layout):
+        """Setup the batch processing section with consistent styling."""
+        # Main batch processing group
+        batch_group = QGroupBox("Batch Processing")
+        batch_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 12px;
+                border: 2px solid palette(mid);
+                border-radius: 8px;
+                margin: 10px 0px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+        
+        batch_main_layout = QVBoxLayout(batch_group)
+        batch_main_layout.setContentsMargins(16, 20, 16, 16)
+        batch_main_layout.setSpacing(16)
+        
+        # Image selection sub-group
+        image_selection_group = QGroupBox("Image Selection")
+        image_selection_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        image_selection_layout = QVBoxLayout(image_selection_group)
+        image_selection_layout.setContentsMargins(12, 16, 12, 12)
+        image_selection_layout.setSpacing(12)
         
         # Image selection controls
         image_controls_layout = QHBoxLayout()
         self.btn_select_images = QPushButton("Select Images")
+        self.btn_select_images.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+                background-color: #3498db;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+                border: 2px solid #1f618d;
+            }
+            QPushButton:pressed {
+                background-color: #1f618d;
+            }
+        """)
         self.btn_clear_images = QPushButton("Clear List")
+        self.btn_clear_images.setStyleSheet("""
+            QPushButton {
+                padding: 8px 16px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+                background-color: #e74c3c;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+                border: 2px solid #a93226;
+            }
+            QPushButton:pressed {
+                background-color: #a93226;
+            }
+        """)
         
-        image_controls_layout.addWidget(self.btn_select_images)
-        image_controls_layout.addWidget(self.btn_clear_images)
-        image_controls_layout.addStretch()
+        # Fai occupare a ciascun pulsante metà dello spazio disponibile
+        image_controls_layout.addWidget(self.btn_select_images, stretch=1)
+        image_controls_layout.addWidget(self.btn_clear_images, stretch=1)
+        # Rimuovi addStretch() per farli occupare tutto lo spazio
         
-        batch_layout.addLayout(image_controls_layout)
+        image_selection_layout.addLayout(image_controls_layout)
         
         # Images list
         self.images_list = QListWidget()
         self.images_list.setMaximumHeight(120)
-        self.images_list.setStyleSheet(
-            "QListWidget { border: 1px solid palette(mid); }"
-            "QListWidget::item { padding: 4px; }"
-            "QListWidget::item:selected { background-color: palette(highlight); color: palette(highlighted-text); }"
-            "QListWidget::item:hover { background-color: palette(light); }"
-        )
-        batch_layout.addWidget(self.images_list)
+        self.images_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                font-size: 11px;
+                background-color: palette(base);
+                padding: 4px;
+            }
+            QListWidget::item {
+                padding: 6px 8px;
+                border: none;
+                border-radius: 4px;
+                margin: 2px;
+            }
+            QListWidget::item:selected {
+                background-color: palette(highlight);
+                color: palette(highlighted-text);
+            }
+            QListWidget::item:hover {
+                background-color: palette(light);
+            }
+        """)
+        image_selection_layout.addWidget(self.images_list)
+        
+        # Processing controls sub-group
+        processing_group = QGroupBox("Processing Control")
+        processing_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: normal;
+                font-size: 11px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                margin: 5px 0px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 6px 0 6px;
+            }
+        """)
+        processing_layout = QVBoxLayout(processing_group)
+        processing_layout.setContentsMargins(12, 16, 12, 12)
+        processing_layout.setSpacing(12)
         
         # Processing controls
-        process_layout = QHBoxLayout()
         self.btn_process_batch = QPushButton("Process All Images")
-
+        self.btn_process_batch.setStyleSheet("""
+            QPushButton {
+                padding: 10px 16px;
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+                background-color: #2ecc71;
+                color: white;
+                min-height: 24px;
+            }
+            QPushButton:hover {
+                background-color: #27ae60;
+                border: 2px solid #229954;
+            }
+            QPushButton:pressed {
+                background-color: #229954;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+                color: #7f8c8d;
+                border: 1px solid #95a5a6;
+            }
+        """)
         self.btn_process_batch.setEnabled(False)  # Disabled until images and preset are loaded
         
         self.batch_progress = QProgressBar()
+        self.batch_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid palette(mid);
+                border-radius: 6px;
+                text-align: center;
+                font-size: 11px;
+                height: 20px;
+            }
+            QProgressBar::chunk {
+                background-color: #2ecc71;
+                border-radius: 6px;
+            }
+        """)
         self.batch_progress.setVisible(False)
         
-        process_layout.addWidget(self.btn_process_batch)
-        batch_layout.addLayout(process_layout)
-        batch_layout.addWidget(self.batch_progress)
+        processing_layout.addWidget(self.btn_process_batch)
+        processing_layout.addWidget(self.batch_progress)
         
-        self.tab_batch_layout.addWidget(batch_group)
+        # Add sub-groups to main layout
+        batch_main_layout.addWidget(image_selection_group)
+        batch_main_layout.addWidget(processing_group)
         
-
-        
-        # Initialize batch processing data
-        self.batch_images = []
-        self.preset_data = None
+        parent_layout.addWidget(batch_group)
         
     def _init_data_storage(self):
         """Initialize data storage variables."""
@@ -3505,83 +4618,6 @@ class ThermalAnalyzerNG(QMainWindow):
             self.btn_process_batch.setEnabled(True)
             self.btn_select_images.setEnabled(True)
             self.btn_load_preset.setEnabled(True)
-    def _process_single_image_with_preset(self, image_path, output_dir):
-        """
-        Process a single image with the loaded preset.
-        """
-        try:
-            # Store current state to restore later
-            original_image_path = self.current_image_path
-            
-            # SOLUZIONE 1: Disabilitare temporaneamente il caricamento automatico
-            # per evitare conflitti con il preset
-            self.thermal_engine.data_loaded.disconnect(self.on_thermal_data_loaded)
-            
-            # Load the thermal image (senza automatic settings loading)
-            if not self.thermal_engine.load_thermal_image(image_path):
-                print(f"Failed to load thermal data from {image_path}")
-                return False
-            
-            # AGGIUNTA: Settare i percorsi dell'immagine corrente (essenziale per l'export!)
-            self.current_image_path = image_path
-            self.settings_manager.set_current_image_path(image_path)
-            
-            # SOLUZIONE 2: Applicare PRIMA il preset e POI calcolare le temperatures
-            self._apply_preset_to_current_image_for_batch()
-            
-            # Calcolare le temperatures con i parametri del preset
-            thermal_params = self.get_current_thermal_parameters()
-            if self.thermal_engine.calculate_temperatures(thermal_params):
-                self.roi_controller.update_all_analyses()
-            
-            # CRITICAL FIX: Synchronize pixmaps from thermal_engine to main_window AND image_view
-            # This ensures that the export functions use the correct thermal and visible images
-            # for the current file, not from a previous file or preset
-
-            # Update thermal pixmap
-            thermal_pixmap = self.thermal_engine.create_colored_pixmap(
-                self.selected_palette, 
-                self.palette_inverted
-            )
-            self.base_pixmap = thermal_pixmap
-
-            # Update visible pixmap  
-            self.base_pixmap_visible = self.thermal_engine.base_pixmap_visible
-
-            # CRUCIAL: Update the image view pixmaps as well
-            # The export_overlay_image method uses these internal pixmaps!
-            if thermal_pixmap and not thermal_pixmap.isNull():
-                self.image_view.set_thermal_pixmap(thermal_pixmap)
-                
-            if self.thermal_engine.base_pixmap_visible and not self.thermal_engine.base_pixmap_visible.isNull():
-                self.image_view.set_visible_pixmap(self.thermal_engine.base_pixmap_visible)
-
-            print(f"🔄 Synchronized pixmaps for {os.path.basename(image_path)}")
-            print(f"  - Thermal pixmap: {thermal_pixmap.width() if thermal_pixmap else 0}x{thermal_pixmap.height() if thermal_pixmap else 0}")
-            print(f"  - Visible pixmap: {self.base_pixmap_visible.width() if self.base_pixmap_visible else 0}x{self.base_pixmap_visible.height() if self.base_pixmap_visible else 0}")
-            print(f"  - Image view thermal updated: {not self.image_view._thermal_item.pixmap().isNull()}")
-            print(f"  - Image view visible updated: {not self.image_view._visible_item.pixmap().isNull()}")
-            
-            # Generate output filename base
-            image_name = os.path.splitext(os.path.basename(image_path))[0]
-            output_base = os.path.join(output_dir, image_name)
-            
-            # Export the analysis
-            return self._export_image_analysis(output_base)
-            
-        except Exception as e:
-            print(f"Error processing {image_path}: {e}")
-            import traceback
-            traceback.print_exc()  # Debug completo degli errori
-            return False
-        finally:
-            # IMPORTANTE: Ricollegare il signal
-            self.thermal_engine.data_loaded.connect(self.on_thermal_data_loaded)
-            
-            # Ripristinare lo stato originale
-            self.current_image_path = original_image_path
-            if original_image_path:
-                self.settings_manager.set_current_image_path(original_image_path)
 
     def _apply_preset_to_current_image_for_batch(self):
         """Apply preset configuration specifically for batch processing."""

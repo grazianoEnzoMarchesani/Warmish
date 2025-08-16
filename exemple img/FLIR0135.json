@@ -1,11 +1,11 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.2,
+    "Emissivity": 0.98,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5,
-    "ObjectDistance": 1.0,
+    "ObjectDistance": 3.469,
     "ReflectedApparentTemperature": 19.999994
   },
   "palette": "Plasma",
@@ -25,7 +25,7 @@
   "roi_label_settings": {
     "name": true,
     "emissivity": true,
-    "min": false,
+    "min": true,
     "max": true,
     "avg": true,
     "median": false
@@ -35,8 +35,8 @@
       "type": "RectROI",
       "name": "aaaa",
       "emissivity": 0.95,
-      "x": 76.29427792915531,
-      "y": 60.490463215258856,
+      "x": 52.0,
+      "y": 45.0,
       "width": 40.5449591280654,
       "height": 109.86376021798365
     },
@@ -46,15 +46,15 @@
       "emissivity": 0.95,
       "points": [
         [
-          213.62397820163486,
+          190.7356948228883,
           125.88555858310627
         ],
         [
-          310.408719346049,
+          287.52043596730243,
           97.76566757493188
         ],
         [
-          310.408719346049,
+          287.52043596730243,
           187.35694822888283
         ]
       ]
@@ -63,9 +63,45 @@
       "type": "SpotROI",
       "name": "fffffff",
       "emissivity": 0.95,
-      "x": 72.37057220708446,
-      "y": 208.93732970027247,
+      "x": 50.79019073569482,
+      "y": 214.16893732970027,
       "radius": 13.26975476839236
+    },
+    {
+      "type": "SpotROI",
+      "name": "Spot_1",
+      "emissivity": 0.95,
+      "x": 133.841961852861,
+      "y": 106.26702997275206,
+      "radius": 27.00272479564032
+    },
+    {
+      "type": "RectROI",
+      "name": "Rectangle_2",
+      "emissivity": 0.95,
+      "x": 224.08719346049048,
+      "y": 212.86103542234332,
+      "width": 27.46594005449589,
+      "height": 24.196185286103542
+    },
+    {
+      "type": "PolygonROI",
+      "name": "Polygon_3",
+      "emissivity": 0.95,
+      "points": [
+        [
+          131.8801089918256,
+          223.32425068119892
+        ],
+        [
+          148.88283378746593,
+          205.6675749318801
+        ],
+        [
+          176.34877384196184,
+          218.09264305177112
+        ]
+      ]
     }
   ]
 }

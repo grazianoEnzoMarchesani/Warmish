@@ -8,12 +8,12 @@
     "ObjectDistance": 3.0,
     "ReflectedApparentTemperature": 24.999994
   },
-  "palette": "Grayscale",
+  "palette": "BrBG",
   "palette_inverted": true,
   "temp_range_settings": {
-    "mode": "manual",
-    "manual_min": 30.43,
-    "manual_max": 32.04
+    "mode": "autorange",
+    "manual_min": 0.0,
+    "manual_max": 100.0
   },
   "overlay_settings": {
     "scale": 0.7405293836351845,
@@ -32,52 +32,21 @@
   },
   "rois": [
     {
-      "type": "RectROI",
-      "name": "ROI_1",
-      "emissivity": 0.1,
-      "x": 12,
-      "y": 142,
-      "width": 156.9195153507594,
-      "height": 286.1581306098353
-    },
-    {
       "type": "SpotROI",
-      "name": "Spot_2",
-      "emissivity": 0.001,
-      "x": 396.11198677246057,
-      "y": 258.6558860667882,
-      "radius": 21.537953795379508
-    },
-    {
-      "type": "SpotROI",
-      "name": "Spot_3",
-      "emissivity": 0.3,
-      "x": 235.60266905259556,
-      "y": 136.70576280671906,
-      "radius": 126.40326975476839
-    },
-    {
-      "type": "PolygonROI",
-      "name": "Polygon_4",
+      "name": "Spot_1",
       "emissivity": 0.95,
-      "points": [
-        [
-          121.79190014506894,
-          356.53589320268776
-        ],
-        [
-          215.20469242641832,
-          336.5698001959871
-        ],
-        [
-          174.55943166277774,
-          320.169080940483
-        ],
-        [
-          121.79190014506894,
-          356.53589320268776
-        ]
-      ]
+      "x": 413.5426181064589,
+      "y": 250.94953371454886,
+      "radius": 128.98591549295776
+    },
+    {
+      "type": "RectROI",
+      "name": "Rectangle_2",
+      "emissivity": 0.95,
+      "x": 33,
+      "y": 131,
+      "width": 179.1825613079019,
+      "height": 172.64305177111717
     }
   ]
 }
