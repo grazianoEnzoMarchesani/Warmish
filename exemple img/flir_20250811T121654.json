@@ -43,8 +43,8 @@
       "type": "RectROI",
       "name": "Rectangle_2",
       "emissivity": 0.95,
-      "x": 33,
-      "y": 131,
+      "x": 33.0,
+      "y": 131.0,
       "width": 179.1825613079019,
       "height": 172.64305177111717
     }

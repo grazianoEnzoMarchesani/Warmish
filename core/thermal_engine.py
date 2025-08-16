@@ -18,6 +18,26 @@ from PySide6.QtCore import QObject, Signal, Qt, QPointF, QRectF, QRect
 from constants import PALETTE_MAP
 import matplotlib.cm as cm
 
+# ==============================================================================
+# MODIFICA 1: Aggiunta degli import necessari e della funzione di supporto
+# ==============================================================================
+import sys
+import os
+
+def resource_path(relative_path):
+    """ Ottiene il percorso assoluto della risorsa, funziona sia in dev che con PyInstaller """
+    try:
+        # PyInstaller crea una cartella temporanea e ci salva il percorso in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Se non siamo in un pacchetto, usiamo il percorso del file corrente
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+# ==============================================================================
+# Fine Modifica 1
+# ==============================================================================
+
 
 class ThermalEngine(QObject):
     """
@@ -77,13 +97,23 @@ class ThermalEngine(QObject):
         try:
             self.current_image_path = file_path
             
+            # ==============================================================================
+            # MODIFICA 2: Usa resource_path per trovare exiftool
+            # Essendo su macOS, il nome dell'eseguibile è "exiftool".
+            # Il codice è scritto per funzionare anche su Windows ("exiftool.exe").
+            # ==============================================================================
+            exiftool_executable = resource_path("exiftool_bin" if sys.platform != "win32" else "exiftool.exe")
+
             # Extract EXIF metadata using exiftool
-            with exiftool.ExifTool() as et:
+            with exiftool.ExifTool(executable=exiftool_executable) as et:
                 json_string = et.execute(b"-json", file_path.encode())
                 self.metadata = json.loads(json_string)[0]
                 
             # Extract raw thermal data
-            command = ["exiftool", "-b", "-RawThermalImage", file_path]
+            command = [exiftool_executable, "-b", "-RawThermalImage", file_path]
+            # ==============================================================================
+            # Fine Modifica 2
+            # ==============================================================================
             result = subprocess.run(command, capture_output=True, check=True)
             raw_thermal_bytes = result.stdout
             
@@ -124,7 +154,14 @@ class ThermalEngine(QObject):
             file_path (str): Path to the thermal image file.
         """
         try:
-            command_rgb = ["exiftool", "-b", "-EmbeddedImage", file_path]
+            # ==============================================================================
+            # MODIFICA 3: Usa resource_path anche qui per coerenza
+            # ==============================================================================
+            exiftool_executable = resource_path("exiftool_bin" if sys.platform != "win32" else "exiftool.exe")
+            command_rgb = [exiftool_executable, "-b", "-EmbeddedImage", file_path]
+            # ==============================================================================
+            # Fine Modifica 3
+            # ==============================================================================
             result_rgb = subprocess.run(command_rgb, capture_output=True, check=True)
             rgb_bytes = result_rgb.stdout
             

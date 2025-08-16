@@ -1,26 +1,26 @@
 {
   "version": "1.0",
   "thermal_parameters": {
-    "Emissivity": 0.98,
+    "Emissivity": 0.1,
     "AtmosphericTemperature": 20.0,
     "AtmosphericTransmission": 0.95,
     "RelativeHumidity": 0.5,
-    "ObjectDistance": 3.469,
+    "ObjectDistance": 1.0,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "Plasma",
-  "palette_inverted": true,
+  "palette": "Bone",
+  "palette_inverted": false,
   "temp_range_settings": {
     "mode": "autorange",
     "manual_min": 0.0,
     "manual_max": 100.0
   },
   "overlay_settings": {
-    "scale": 0.7405293836351845,
+    "scale": 0.8610000000000001,
     "offset_x": -10,
-    "offset_y": -27,
+    "offset_y": -10,
     "opacity": 100,
-    "blend_mode": "Normal"
+    "blend_mode": "HardLight"
   },
   "roi_label_settings": {
     "name": true,
@@ -32,57 +32,21 @@
   },
   "rois": [
     {
-      "type": "RectROI",
-      "name": "aaaa",
-      "emissivity": 0.95,
-      "x": 52.0,
-      "y": 45.0,
-      "width": 40.5449591280654,
-      "height": 109.86376021798365
-    },
-    {
-      "type": "PolygonROI",
-      "name": "ssss",
-      "emissivity": 0.95,
-      "points": [
-        [
-          190.7356948228883,
-          125.88555858310627
-        ],
-        [
-          287.52043596730243,
-          97.76566757493188
-        ],
-        [
-          287.52043596730243,
-          187.35694822888283
-        ]
-      ]
-    },
-    {
-      "type": "SpotROI",
-      "name": "fffffff",
-      "emissivity": 0.95,
-      "x": 50.79019073569482,
-      "y": 214.16893732970027,
-      "radius": 13.26975476839236
-    },
-    {
       "type": "SpotROI",
       "name": "Spot_1",
       "emissivity": 0.95,
-      "x": 133.841961852861,
-      "y": 106.26702997275206,
-      "radius": 27.00272479564032
+      "x": 162.4489223831188,
+      "y": 98.76327933405395,
+      "radius": 10.0
     },
     {
       "type": "RectROI",
       "name": "Rectangle_2",
       "emissivity": 0.95,
-      "x": 224.08719346049048,
-      "y": 212.86103542234332,
-      "width": 27.46594005449589,
-      "height": 24.196185286103542
+      "x": -22.0,
+      "y": 131.0,
+      "width": 84.45747800586511,
+      "height": 71.08504398826979
     },
     {
       "type": "PolygonROI",
@@ -90,16 +54,16 @@
       "emissivity": 0.95,
       "points": [
         [
-          131.8801089918256,
-          223.32425068119892
+          72.46779809406465,
+          197.54798382036537
         ],
         [
-          148.88283378746593,
-          205.6675749318801
+          116.82994020022844,
+          328.1873534201693
         ],
         [
-          176.34877384196184,
-          218.09264305177112
+          191.86924988798958,
+          214.63453028863228
         ]
       ]
     }

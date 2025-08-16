@@ -16,6 +16,24 @@ from PySide6.QtWidgets import (QApplication, QSplashScreen, QGraphicsOpacityEffe
 from PySide6.QtSvg import QSvgRenderer
 from ui.main_window import ThermalAnalyzerNG
 
+# ==============================================================================
+# MODIFICA 1: Aggiunta della funzione di supporto resource_path
+# Questa funzione è IDENTICA a quella usata in thermal_engine.py
+# ==============================================================================
+def resource_path(relative_path):
+    """ Ottiene il percorso assoluto della risorsa, funziona sia in dev che con PyInstaller """
+    try:
+        # PyInstaller crea una cartella temporanea e ci salva il percorso in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Se non siamo in un pacchetto, usiamo il percorso del file corrente
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+# ==============================================================================
+# Fine Modifica 1
+# ==============================================================================
+
 
 class AppWindow(ThermalAnalyzerNG):
     """
@@ -129,12 +147,23 @@ if __name__ == "__main__":
         app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
         app.setStyle("windowsvista") # Enables native support for Windows dark theme
 
-    # Define the path to the splash screen logo.
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    svg_path = os.path.join(base_dir, "Warmish Logo.svg")
+    # ==============================================================================
+    # MODIFICA 2: Usa resource_path per trovare il logo SVG
+    # ==============================================================================
+    # RIGA ORIGINALE COMMENTATA:
+    # base_dir = os.path.dirname(os.path.abspath(__file__))
+    # svg_path = os.path.join(base_dir, "Warmish Logo.svg")
+    
+    # NUOVA RIGA:
+    svg_path = resource_path("Warmish Logo.svg")
+    # ==============================================================================
+    # Fine Modifica 2
+    # ==============================================================================
 
     # If the logo SVG doesn't exist, create a simple placeholder.
     if not os.path.exists(svg_path):
+        # NOTA: Questa parte di codice non verrà eseguita nel pacchetto finale,
+        # perché il file esisterà. È utile solo durante lo sviluppo se il file manca.
         svg_content = (
             '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" '
             'viewBox="0 0 200 100"><rect width="200" height="100" '
@@ -142,8 +171,12 @@ if __name__ == "__main__":
             'dominant-baseline="middle" text-anchor="middle" fill="white" '
             'font-size="20">Logo</text></svg>'
         )
-        with open(svg_path, 'w') as f:
+        # Usiamo il percorso originale per creare il file se manca, ma PyInstaller lo includerà.
+        original_svg_path = os.path.join(os.path.abspath("."), "Warmish Logo.svg")
+        with open(original_svg_path, 'w') as f:
             f.write(svg_content)
+        svg_path = original_svg_path
+
 
     # Create the pixmap for the splash screen
     screen = app.primaryScreen()

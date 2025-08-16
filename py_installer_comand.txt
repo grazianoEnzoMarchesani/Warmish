@@ -1,0 +1,1 @@
+pyinstaller --name "Warmish_1.0" --windowed --onedir --add-binary "exiftool_bin:." --add-data "Warmish Logo.svg:." --icon="Icon.icns" main.py

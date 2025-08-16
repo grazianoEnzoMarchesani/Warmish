@@ -3780,16 +3780,30 @@ class ThermalAnalyzerNG(QMainWindow):
 
     def _export_thermal_image(self, file_path: str) -> bool:
         """Export the thermal image with current settings."""
-        current_params = self.get_current_thermal_parameters()
-        
-        return self.thermal_engine.export_thermal_image(
-            file_path, 
-            self.selected_palette, 
-            self.palette_inverted, 
-            scale_factor=2.0, 
-            include_legend=True,
-            current_thermal_params=current_params
-        )
+        try:
+            print(f"🔧 _export_thermal_image: Getting current thermal parameters...")
+            current_params = self.get_current_thermal_parameters()
+            print(f"📊 Current thermal params: {current_params}")
+            
+            print(f"🎨 Using palette: {self.selected_palette}, inverted: {self.palette_inverted}")
+            
+            result = self.thermal_engine.export_thermal_image(
+                file_path, 
+                self.selected_palette, 
+                self.palette_inverted, 
+                scale_factor=2.0, 
+                include_legend=True,
+                current_thermal_params=current_params
+            )
+            
+            print(f"🎯 Thermal export result: {result}")
+            return result
+            
+        except Exception as e:
+            print(f"💥 Error in _export_thermal_image: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def _export_visible_image(self, file_path: str) -> bool:
         """
@@ -3891,17 +3905,32 @@ class ThermalAnalyzerNG(QMainWindow):
 
     def _export_thermal_with_rois(self, file_path: str) -> bool:
         """Export thermal image with ROIs drawn on top."""
-        current_params = self.get_current_thermal_parameters()
-        
-        return self.thermal_engine.export_thermal_with_rois(
-            file_path, 
-            self.selected_palette, 
-            self.palette_inverted, 
-            self.roi_items,  # ✅ CORRETTO: MainWindow.roi_items, non roi_controller.roi_items
-            scale_factor=2.0, 
-            include_legend=True,
-            current_thermal_params=current_params
-        )
+        try:
+            print(f"🔧 _export_thermal_with_rois: Getting current thermal parameters...")
+            current_params = self.get_current_thermal_parameters()
+            print(f"📊 Current thermal params: {current_params}")
+            
+            print(f"🎯 Number of ROI items: {len(self.roi_items) if self.roi_items else 0}")
+            print(f"🎨 Using palette: {self.selected_palette}, inverted: {self.palette_inverted}")
+            
+            result = self.thermal_engine.export_thermal_with_rois(
+                file_path, 
+                self.selected_palette, 
+                self.palette_inverted, 
+                self.roi_items,  # ✅ CORRETTO: MainWindow.roi_items, non roi_controller.roi_items
+                scale_factor=2.0, 
+                include_legend=True,
+                current_thermal_params=current_params
+            )
+            
+            print(f"🎯 Thermal with ROIs export result: {result}")
+            return result
+            
+        except Exception as e:
+            print(f"💥 Error in _export_thermal_with_rois: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def _export_current_scene(self, file_path: str) -> bool:
         """
@@ -4627,14 +4656,18 @@ class ThermalAnalyzerNG(QMainWindow):
         try:
             self._ignore_auto_save = True
             
-            # Popolare PRIMA i parametri dall'immagine (come base)
-            self.populate_params_from_engine()
-            
-            # Poi sovrascrivere SOLO i parametri del preset se richiesto
+            # Apply thermal parameters from preset (assuming base parameters are already populated)
+            print(f"🔧 Applying thermal parameters from preset...")
             if self.cb_thermal_params.isChecked() and "thermal_parameters" in self.preset_data:
+                print(f"📊 Found thermal parameters in preset: {self.preset_data['thermal_parameters']}")
+                applied_count = 0
                 for param, value in self.preset_data["thermal_parameters"].items():
                     if param in self.param_inputs:
+                        old_value = self.param_inputs[param].text()
                         self.param_inputs[param].setText(str(value))
+                        print(f"  ✅ {param}: {old_value} → {value}")
+                        applied_count += 1
+                print(f"🎯 Applied {applied_count} thermal parameters from preset")
             
             # Applicare la palette (sempre, dato che rimuoveremo il checkbox)
             if "palette" in self.preset_data:
@@ -4691,6 +4724,78 @@ class ThermalAnalyzerNG(QMainWindow):
         finally:
             self._ignore_auto_save = False
 
+    def _process_single_image_with_preset(self, image_path: str, output_dir: str) -> bool:
+        """
+        Process a single image with the loaded preset and export analysis.
+        
+        This method loads the specified image, applies the preset configuration,
+        and exports all analysis data to the specified output directory.
+        
+        Args:
+            image_path (str): Path to the thermal image to process
+            output_dir (str): Directory where to save exported files
+            
+        Returns:
+            bool: True if processing and export were successful
+        """
+        try:
+            print(f"🔄 Processing image: {os.path.basename(image_path)}")
+            
+            # Load the thermal image
+            print(f"📂 Loading thermal image: {image_path}")
+            if not self.thermal_engine.load_thermal_image(image_path):
+                print(f"❌ Failed to load image: {image_path}")
+                return False
+            
+            print(f"✅ Image loaded successfully")
+            
+            # First populate base parameters from EXIF
+            print(f"🔄 Populating base parameters from EXIF...")
+            self.populate_params_from_engine()
+            
+            # Then apply preset configuration (this will override EXIF values with preset values)
+            print(f"🔧 Applying preset configuration...")
+            self._apply_preset_to_current_image_for_batch()
+            
+            # Update display to reflect changes (this triggers thermal processing)
+            print(f"🔄 Updating thermal display...")
+            self.update_thermal_display()
+            
+            # Force update thermal parameters for export
+            print(f"⚙️ Forcing thermal parameter update...")
+            thermal_params = self.get_current_thermal_parameters()
+            if self.thermal_engine.calculate_temperatures(thermal_params):
+                print(f"✅ Thermal parameters updated successfully")
+                # Update ROI analysis with new temperatures
+                self.roi_controller.update_all_analyses()
+            else:
+                print(f"❌ Failed to update thermal parameters")
+            
+            # Ensure palette is correctly set
+            print(f"🎨 Current palette: {self.selected_palette}, inverted: {self.palette_inverted}")
+            
+            # Create base path for export files
+            image_name = os.path.splitext(os.path.basename(image_path))[0]
+            base_path = os.path.join(output_dir, image_name)
+            
+            print(f"💾 Starting export to: {base_path}")
+            
+            # Export analysis using existing method
+            result = self._export_image_analysis(base_path)
+            
+            if result:
+                print(f"✅ Successfully processed and exported: {os.path.basename(image_path)}")
+            else:
+                print(f"❌ Failed to export analysis for: {os.path.basename(image_path)}")
+                
+            return result
+            
+        except Exception as e:
+            print(f"💥 Error processing image {image_path} with preset: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     def _export_image_analysis(self, base_path):
         """
         Export analysis for a single image.
@@ -4704,36 +4809,60 @@ class ThermalAnalyzerNG(QMainWindow):
         try:
             exported_files = []
             
+            print(f"🔄 Starting export for: {os.path.basename(base_path)}")
+            
             # Export thermal image (clean)
             thermal_path = f"{base_path}_thermal.png"
+            print(f"📸 Exporting thermal image to: {thermal_path}")
             if self._export_thermal_image(thermal_path):
                 exported_files.append(thermal_path)
+                print(f"✅ Thermal image exported successfully")
+            else:
+                print(f"❌ Failed to export thermal image")
             
             # Export thermal image with ROIs
             thermal_roi_path = f"{base_path}_thermal_with_rois.png"
+            print(f"🎯 Exporting thermal image with ROIs to: {thermal_roi_path}")
             if self._export_thermal_with_rois(thermal_roi_path):
                 exported_files.append(thermal_roi_path)
+                print(f"✅ Thermal image with ROIs exported successfully")
+            else:
+                print(f"❌ Failed to export thermal image with ROIs")
             
             # Export visible image (if available)
             visible_path = f"{base_path}_visible.png"
+            print(f"👁️ Exporting visible image to: {visible_path}")
             if self._export_visible_image(visible_path):
                 exported_files.append(visible_path)
+                print(f"✅ Visible image exported successfully")
+            else:
+                print(f"❌ Failed to export visible image")
             
             # Export overlay image
             overlay_path = f"{base_path}_overlay.png"
+            print(f"🎭 Exporting overlay image to: {overlay_path}")
             if self._export_overlay_image(overlay_path):
                 exported_files.append(overlay_path)
+                print(f"✅ Overlay image exported successfully")
+            else:
+                print(f"❌ Failed to export overlay image")
             
             # Export data CSV
             csv_path = f"{base_path}_data.csv"
+            print(f"📊 Exporting data CSV to: {csv_path}")
             if self._export_analysis_csv(csv_path):
                 exported_files.append(csv_path)
+                print(f"✅ Data CSV exported successfully")
+            else:
+                print(f"❌ Failed to export data CSV")
             
-            print(f"Exported {len(exported_files)} files for {os.path.basename(base_path)}")
+            print(f"🎯 Export completed: {len(exported_files)}/{5} files exported for {os.path.basename(base_path)}")
             return len(exported_files) > 0
             
         except Exception as e:
-            print(f"Error exporting analysis for {base_path}: {e}")
+            print(f"💥 Error exporting analysis for {base_path}: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def update_metadata_display(self):
