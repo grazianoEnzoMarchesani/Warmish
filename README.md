@@ -93,11 +93,69 @@
 - `ui/widgets/color_bar_legend.py` — The colour legend widget.
 - `constants.py` — Maps palette names to Matplotlib colormaps.
 
+### Application Architecture
+
+This project follows a clean, decoupled architecture that separates the User Interface (UI) from the core business logic. This design improves maintainability, testability, and allows for easier future extensions.
+
+The architecture is divided into three main layers: the **UI Layer**, the **Core Logic Layer**, and the **Data Models**, which interact with external tools and the file system.
+
+The following diagram illustrates the primary components and their key interaction flows:
+
+```mermaid
+---
+config:
+  layout: dagre
+---
+flowchart LR
+ subgraph subGraph0["UI Layer"]
+    direction TB
+        MainWindow["<b>main_window.py</b><br>ThermalAnalyzerNG<br><br><i>Orchestrates UI and Core logic.<br>Handles all user actions.</i>"]
+        ImageView["<b>image_graphics_view.py</b><br>ImageGraphicsView<br><br><i>Displays images, handles zoom/pan,<br>and manages ROI drawing.</i>"]
+        ROIItems["<b>roi_items.py</b><br>RectROIItem, SpotROIItem, etc.<br><br><i>Graphical representation of ROIs<br>within the image view.</i>"]
+  end
+ subgraph subGraph1["Core Logic Layer"]
+    direction TB
+        ThermalEngine["<b>thermal_engine.py</b><br>ThermalEngine<br><br><i>Loads thermal data, calculates<br>temperatures, and creates images.</i>"]
+        ROIController["<b>roi_controller.py</b><br>ROIController<br><br><i>Manages ROI data models<br>and calculates their statistics.</i>"]
+        SettingsManager["<b>settings_manager.py</b><br>SettingsManager<br><br><i>Saves and loads analysis settings<br>to/from JSON files.</i>"]
+  end
+ subgraph subGraph2["Data Models"]
+    direction TB
+        ROIModels["<b>roi_models.py</b><br>RectROI, SpotROI, PolygonROI<br><br><i>Plain data classes holding the geometry<br>and analysis results of ROIs.</i>"]
+  end
+ subgraph subGraph3["External Dependencies"]
+    direction TB
+        FileSystem[("File System<br>(JSON, CSV, PNG)")]
+        Exiftool[("exiftool CLI")]
+  end
+    User(["User"]) -- Opens a thermal image --> MainWindow
+    MainWindow -- Delegates to --> ThermalEngine & ROIController
+    ThermalEngine -- Uses --> Exiftool
+    ThermalEngine -. Notifies .-> MainWindow
+    MainWindow -- Loads associated settings --> SettingsManager
+    SettingsManager -- Reads from --> FileSystem
+    User -- Draws an ROI --> ImageView
+    ImageView -. Signals new geometry .-> MainWindow
+    ROIController -- Creates --> ROIModels
+    ROIController -- Requests temps from --> ThermalEngine
+    ROIController -. Notifies .-> MainWindow
+    MainWindow -- Creates visual --> ROIItems
+    MainWindow -- On any change --> SettingsManager
+    SettingsManager -- Writes to --> FileSystem
+    User -- Exports analysis --> MainWindow
+    MainWindow -- Orchestrates export --> ThermalEngine
+    MainWindow -- Retrieves data from --> ROIController
+    ThermalEngine -- Writes files to --> FileSystem
+    MainWindow -- Writes files to --> FileSystem
+    MainWindow -- Contains --> ImageView
+    ImageView -- Contains --> ROIItems
+```
+
 ---
 
 ## Technical Requirements
 
-- **Language**: Python 3 (**3.11 recommended**; developed on 3.13)
+- **Language**: Python 3 (developed on 3.13)
 - **GUI**: PySide6 (Qt for Python)
 - **Processing**: numpy, Pillow (PIL)
 - **Colours**: matplotlib
@@ -110,7 +168,7 @@
 
 ### 1) Prerequisites
 
-- **Python 3** (version 3.11 is recommended for best compatibility with packaging tools).
+- **Python 3** (version 3.13 is recommended for best compatibility with packaging tools).
 - **ExifTool** must be installed and accessible in the system `PATH`.
   - **Official website:** [ExifTool](https://exiftool.org)
   - **On macOS (using Homebrew):** `brew install exiftool`
