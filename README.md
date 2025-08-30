@@ -5,6 +5,9 @@
 
 **Warmish** is a cross-platform graphical tool for the advanced analysis of radiometric thermal images (FLIR JPEG). Built on a modern architecture with `QGraphicsView`, it allows you to extract metadata, calculate temperature matrices, visualise thermal maps with customisable palettes, and work with a visible image overlay. The interface, developed in PySide6, offers interactive controls for synchronised zoom/pan, a dynamic legend, a powerful **Region of Interest (ROI) analysis** system, and a comprehensive suite of export tools.
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16887040.svg)](https://doi.org/10.5281/zenodo.16887040)
+
+
 ---
 
 ### **Current Version Highlights**
