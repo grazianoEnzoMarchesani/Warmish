@@ -3751,19 +3751,23 @@ class ThermalAnalyzerNG(QMainWindow):
             # Close progress dialog
             progress_msg.close()
             
-            # Show success message
+            # Close progress dialog cleanly before opening success dialog
+            progress_msg.hide()
+            progress_msg.deleteLater()
+            QApplication.processEvents()
+            
             if exported_files:
                 file_list = "\n".join([f"• {os.path.basename(f)}" for f in exported_files])
                 QMessageBox.information(
-                    self, 
-                    "Export Completed", 
+                    self,
+                    "Export Completed",
                     f"Analysis exported successfully!\n\nFiles created:\n{file_list}"
                 )
             else:
                 QMessageBox.warning(
-                    self, 
-                    "Export Failed", 
-                    "No files were exported. Please check the data and try again."
+                    self,
+                    "Export Failed",
+                    "No files were exported.\nPlease check the data and try again."
                 )
                 
         except Exception as e:
