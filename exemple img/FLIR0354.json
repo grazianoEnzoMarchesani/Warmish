@@ -8,7 +8,7 @@
     "ObjectDistance": 1.0,
     "ReflectedApparentTemperature": 19.999994
   },
-  "palette": "Arctic",
+  "palette": "Plasma",
   "palette_inverted": false,
   "temp_range_settings": {
     "mode": "autorange",
@@ -17,9 +17,9 @@
   },
   "overlay_settings": {
     "scale": 0.7405293836351845,
-    "offset_x": -10,
-    "offset_y": -27,
-    "opacity": 93,
+    "offset_x": -10.0,
+    "offset_y": -27.0,
+    "opacity": 100,
     "blend_mode": "Normal"
   },
   "roi_label_settings": {
@@ -32,40 +32,50 @@
   },
   "rois": [
     {
-      "type": "RectROI",
-      "name": "aaaa",
-      "emissivity": 0.5,
-      "x": 16,
-      "y": 115,
-      "width": 92.20708446866486,
-      "height": 109.86376021798365
-    },
-    {
       "type": "PolygonROI",
-      "name": "ssss",
-      "emissivity": 0.95,
+      "name": "Indian stone",
+      "emissivity": 0.85,
       "points": [
         [
-          160.78294096899458,
-          45.299788392011045
+          26.609644835451263,
+          117.62409036602585
         ],
         [
-          257.5676821134087,
-          17.179897383836654
+          46.97458455522968,
+          94.20440968828065
         ],
         [
-          257.5676821134087,
-          106.77117803778759
+          72.09134354295642,
+          93.86499402628434
+        ],
+        [
+          61.90887368306721,
+          114.9087650700554
         ]
       ]
     },
     {
-      "type": "SpotROI",
-      "name": "fffffff",
-      "emissivity": 0.95,
-      "x": 221.09870090886508,
-      "y": 201.0935074476401,
-      "radius": 36.15803814713895
+      "type": "PolygonROI",
+      "name": "Travertino",
+      "emissivity": 0.67,
+      "points": [
+        [
+          257.4122949929402,
+          83.34310850439883
+        ],
+        [
+          263.5217769088737,
+          97.93798197024003
+        ],
+        [
+          311.71880091234937,
+          95.90148799826218
+        ],
+        [
+          300.5180840664712,
+          80.62778320842835
+        ]
+      ]
     }
   ]
 }
