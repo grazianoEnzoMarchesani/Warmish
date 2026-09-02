@@ -183,12 +183,17 @@ try {
   check('restored ROI recomputes the same statistics', restoredMean === roiMean,
     `${restoredMean} vs ${roiMean}`);
 
-  // --- Batch (Phase 4) --------------------------------------------------------
+  // --- Multi-file export (Phase 4) ------------------------------------------
+  // Several images picked at once open as a folder; "Esporta cartella" is the
+  // one batch path now, feeding the same worker.
+  await page.reload();
+  await page.setInputFiles('#pick', [SAMPLE, SAMPLE2]);
+  await page.waitForSelector('.strip .thumb', { timeout: 10_000 });
+  check('multi-select opens the filmstrip', (await page.locator('.strip .thumb').count()) === 2);
   await tab(page, 'Esporta');
-  await page.setInputFiles('#batch', [SAMPLE, SAMPLE2]);
   const zipDownload = await Promise.all([
     page.waitForEvent('download', { timeout: 60_000 }),
-    page.getByRole('button', { name: 'Elabora e scarica ZIP' }).click(),
+    page.getByRole('button', { name: 'Esporta cartella (.zip)' }).click(),
   ]).then(([d]) => d);
   const zipPath = join(SHOTS, 'batch.zip');
   await zipDownload.saveAs(zipPath);
@@ -197,9 +202,12 @@ try {
   const root = entries[0]?.split('/')[0] ?? '';
   check('archive is rooted at warmish_export_<date>', /^warmish_export_\d{4}-\d{2}-\d{2}$/.test(root), root);
   for (const base of ['FLIR0135', 'FLIR0354']) {
+    // No image was edited, so no ROIs and no termica_aree.png — each image
+    // carries its own calibration, the correct default for a loose set.
     check(`batch: ${base} outputs`,
-      ['termica.png', 'termica_annotata.png', 'termica_aree.png', 'visibile.jpg']
+      ['termica.png', 'termica_annotata.png', 'visibile.jpg']
         .every((n) => entries.includes(`${root}/${base}/${n}`))
+        && !entries.includes(`${root}/${base}/termica_aree.png`)
         && entries.includes(`${root}/originali/${base}.json`)
         && entries.includes(`${root}/originali/${base}.jpg`),
       entries.filter((e) => e.includes(base)).join(', '));

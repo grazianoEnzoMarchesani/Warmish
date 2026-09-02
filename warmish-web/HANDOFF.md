@@ -264,10 +264,13 @@ Small and deliberate, listed so nobody rediscovers them as bugs:
 - **Humidity units on import.** Desktop sidecars store a fraction (§4). A value at or
   below 1.5 is read as a fraction, anything above as percent; new files are written
   as percent. `humidityToPercent()` in `session.ts`.
-- **No preset file for batch.** The desktop loads a separate preset JSON; the web
-  batch applies the settings already on screen, with explicit checkboxes for
-  "current parameters" and "current ROIs". Loading a session first gives the same
-  result in one fewer concept.
+- **No preset file for batch, and one batch path.** The desktop loads a separate
+  preset JSON; the web app has no batch presets and no standalone "series" panel.
+  Picking several images at once (or dropping them, or picking a directory) opens
+  the filmstrip; each image keeps its own calibration, edits ride on top per
+  image, and "Applica a selezionate" is the one way to push palette / parameters /
+  areas across a set — with a visible per-image preview, unlike a blind copy.
+  "Esporta cartella (.zip)" then feeds the same worker every other export uses.
 
 ---
 

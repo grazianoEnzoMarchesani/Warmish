@@ -315,7 +315,8 @@
   /** Accepts an image, a session, or both at once — the resume flow from the plan. */
   async function handleFiles(list: FileList | File[]) {
     const files = Array.from(list);
-    const image = files.find((f) => /\.jpe?g$/i.test(f.name));
+    const images = files.filter((f) => /\.jpe?g$/i.test(f.name));
+    const image = images[0];
     const session = files.find((f) => /\.json$/i.test(f.name));
 
     // A lone folder-session file merges into the folder already open.
@@ -338,6 +339,11 @@
         }
       } catch { /* fall through to the normal error */ }
     }
+
+    // Several images at once — dropped or multi-selected — open as a folder, the
+    // same filmstrip + bulk-edit workflow as picking a directory. This is the
+    // only multi-file path, so a loose set from anywhere still gets one zip.
+    if (images.length > 1) { await ingestFolder(files); return; }
 
     if (image) await load(image);
     if (session && file) await loadSession(session);
@@ -863,34 +869,29 @@
     });
   }
 
-  // --- Batch ------------------------------------------------------------------
-  // Raw, not deep-proxied: a File wrapped in a reactive proxy cannot be
-  // structured-cloned, so postMessage to the worker would fail.
-  let batchFiles = $state.raw<File[]>([]);
-  let batchUseCurrentParams = $state(false);
-  let batchIncludeRois = $state(true);
+  // --- Export ----------------------------------------------------------------
+  // Both zip paths — the current image and the whole folder — report through
+  // these; the work itself runs in the one worker in `dispatchExport`.
   let includeOriginals = $state(true);
   let batchProgress = $state<{ done: number; total: number; name: string } | null>(null);
   let batchResult = $state('');
 
-  function renderSettings(overrideParams: boolean): RenderSettings {
-    const userParams: UserParameters | null = overrideParams && params
-      ? {
-          Emissivity: params.Emissivity,
-          ReflectedApparentTemperature: params.ReflectedApparentTemperature,
-          AtmosphericTemperature: params.AtmosphericTemperature,
-          AtmosphericTransmission: params.AtmosphericTransmission,
-          RelativeHumidity: params.RelativeHumidity,
-        }
-      : null;
+  /**
+   * The base settings for a folder export: everything the folder path pins the
+   * same for every image (palette range mode, blend, labels…). Per-image edits
+   * ride on top as `folderOverrides()`; images never touched fall back to this
+   * with their own embedded calibration (`parameters: null`) and their own areas
+   * (cleared here, restored per image by the overrides).
+   */
+  function renderSettings(): RenderSettings {
     return {
       palette, inverted, autoRange, manualMin, manualMax, showVisible,
       blend, opacity,
       alignment: { ...alignment },
       visibleFilter: { ...visibleFilter },
       labels: { ...labels },
-      rois: batchIncludeRois ? rois.map((r) => $state.snapshot(r) as Roi) : [],
-      parameters: userParams,
+      rois: [],
+      parameters: null,
     };
   }
 
@@ -943,18 +944,19 @@
     } satisfies BatchRequest);
   }
 
-  function runBatch(fromFolder = false) {
-    // Folder mode: every image, each carrying its own edited state (or its
-    // sidecar); images never touched keep their own calibration and auto-range.
-    if (fromFolder && activePath) {
+  function exportFolderZip() {
+    // Every image, each carrying its own edited state (or its sidecar); images
+    // never touched keep their own calibration and auto-range.
+    if (activePath) {
       const s = snapshotSession();
       if (s) remember(activePath, s);
     }
-    const files = fromFolder ? folder.map((e) => e.file) : batchFiles;
-    const perFile = fromFolder ? folderOverrides() : undefined;
-    const settings = renderSettings(fromFolder ? false : batchUseCurrentParams);
-    if (fromFolder) settings.rois = [];
-    dispatchExport(files, settings, perFile, includeOriginals);
+    dispatchExport(
+      folder.map((e) => e.file),
+      renderSettings(),
+      folderOverrides(),
+      includeOriginals,
+    );
   }
 
   const fmt = (v: number | undefined) => (v !== undefined && Number.isFinite(v) ? v.toFixed(2) : '—');
@@ -1065,8 +1067,13 @@
   <aside>
     <h1>Warmish <span>Web</span></h1>
 
-    <label for="pick">Immagine FLIR (+ sessione .json)</label>
+    <label for="pick">Immagini FLIR (+ sessione .json)</label>
     <input id="pick" type="file" multiple accept="image/jpeg,.jpg,.jpeg,.json" onchange={onPick} />
+    <p class="hint">
+      Una immagine, con la sua <code>.json</code> se ce l'hai. Più immagini
+      insieme (anche prese da cartelle diverse, o trascinate qui) si aprono come
+      una cartella: striscia, modifica in blocco, un solo ZIP.
+    </p>
 
     <label for="folderpick">Oppure una cartella di immagini</label>
     <input id="folderpick" type="file" webkitdirectory multiple
@@ -1287,12 +1294,15 @@
       {#if folder.length}
         <section class="actions">
           <h2>Cartella aperta ({folder.length} immagini)</h2>
-          <button class="wide" onclick={() => runBatch(true)} disabled={!!batchProgress}>
+          <button class="wide" onclick={exportFolderZip} disabled={!!batchProgress}>
             {batchProgress ? 'Elaborazione…' : 'Esporta cartella (.zip)'}
           </button>
           <p class="hint">
             Ogni immagine con la propria calibrazione e le proprie modifiche
-            (o la sua sessione, se presente).
+            (o la sua sessione, se presente). Per allineare palette, parametri o
+            aree su più foto usa «Applica a selezionate» nella striscia, poi
+            torna qui. Con molte foto e gli originali inclusi lo ZIP diventa grande:
+            togli «includi gli originali» se non ti servono.
           </p>
           <button onclick={exportFolderSession} disabled={!!batchProgress}>
             Salva sessione cartella (.json)
@@ -1304,46 +1314,6 @@
           </p>
         </section>
       {/if}
-
-      <section>
-        <h2>Elaborazione in serie</h2>
-        <label for="batch">Immagini da elaborare</label>
-        <input
-          id="batch"
-          type="file"
-          multiple
-          accept="image/jpeg,.jpg,.jpeg"
-          onchange={(e) => { batchFiles = Array.from((e.currentTarget as HTMLInputElement).files ?? []); batchResult = ''; }}
-        />
-        {#if batchFiles.length}
-          <p class="file">{batchFiles.length} immagini selezionate</p>
-        {/if}
-        <label class="check">
-          <input type="checkbox" bind:checked={batchUseCurrentParams} />
-          Applica i parametri correnti a tutte
-        </label>
-        <label class="check">
-          <input type="checkbox" bind:checked={batchIncludeRois} disabled={!rois.length} />
-          Applica le aree correnti
-        </label>
-        <label class="check">
-          <input type="checkbox" bind:checked={includeOriginals} />
-          Includi gli originali nello ZIP
-        </label>
-        <button class="wide" onclick={() => runBatch()} disabled={!batchFiles.length || !!batchProgress}>
-          {batchProgress ? 'Elaborazione…' : 'Elabora e scarica ZIP'}
-        </button>
-        {#if batchProgress}
-          <progress value={batchProgress.done} max={batchProgress.total}></progress>
-          <p class="hint">{batchProgress.done}/{batchProgress.total} {batchProgress.name}</p>
-        {/if}
-        {#if batchResult}<p class="notice">{batchResult}</p>{/if}
-        <p class="hint">
-          Senza «parametri correnti» ogni immagine usa la propria calibrazione,
-          che è il comportamento corretto per scatti diversi. Con 100 foto e gli
-          originali inclusi lo ZIP diventa grande: togli la spunta se non ti servono.
-        </p>
-      </section>
       {/if}
       </div>
     {/if}
