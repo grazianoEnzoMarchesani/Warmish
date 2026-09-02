@@ -1,0 +1,846 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Warmish Geotag — posiziona le foto a mano</title>
+<link rel="stylesheet" href="lib/leaflet.css" />
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f25; --line: #2c313a; --text: #e6e8ec;
+    --muted: #9aa2ae; --accent: #ff8a3d; --ok: #43c47b; --warn: #ffcc55;
+    color-scheme: dark;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); overflow: hidden; }
+  button, input, select { font: inherit; color: inherit; }
+  button, .btn {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 7px 11px; cursor: pointer; display: inline-block; text-align: center;
+    color: var(--text); font: inherit; line-height: normal;
+    text-transform: none; letter-spacing: normal; margin: 0;
+  }
+  button:hover:not(:disabled), .btn:hover { border-color: var(--accent); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  .vh {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  button.primary { background: var(--accent); color: #101216; border-color: var(--accent); font-weight: 600; }
+  input[type="number"], input[type="text"] {
+    background: #10131a; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%;
+  }
+  label { display: block; font-size: 11px; color: var(--muted); margin: 8px 0 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  #app {
+    display: grid; height: 100%;
+    grid-template-columns: 292px 1fr 324px;
+    transition: grid-template-columns 0.18s ease;
+  }
+  #app.lc { grid-template-columns: 0 1fr 324px; }
+  #app.rc { grid-template-columns: 292px 1fr 0; }
+  #app.lc.rc { grid-template-columns: 0 1fr 0; }
+  @media (max-width: 1024px) {
+    #app { grid-template-columns: 248px 1fr 280px; }
+    #app.lc { grid-template-columns: 0 1fr 280px; }
+    #app.rc { grid-template-columns: 248px 1fr 0; }
+    #app.lc.rc { grid-template-columns: 0 1fr 0; }
+  }
+  aside {
+    background: var(--panel); overflow: hidden;
+    display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  }
+  /* Pin each area to its own column so a collapsed (display:none) sidebar
+     doesn't let the others reflow into the wrong track. */
+  aside.left { grid-column: 1; border-right: 1px solid var(--line); }
+  main { grid-column: 2; }
+  aside.right { grid-column: 3; border-left: 1px solid var(--line); }
+  #app.lc > aside.left, #app.rc > aside.right { display: none; }
+  aside.right #detail { flex: 1; min-height: 0; overflow-y: auto; }
+  aside.right .rhead {
+    position: relative;
+    padding: 14px 40px 14px 16px; border-bottom: 1px solid var(--line);
+    font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  aside header { position: relative; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  aside.left header { padding-right: 40px; }
+
+  /* collapse toggle inside a sidebar, and the floating tab that brings it back */
+  .panel-toggle {
+    position: absolute; top: 10px; width: 26px; height: 26px; padding: 0;
+    display: grid; place-items: center; font-size: 15px; line-height: 1;
+  }
+  aside.left .panel-toggle { right: 8px; }
+  aside.right .panel-toggle { right: 8px; }
+  .reveal {
+    position: fixed; top: 50%; transform: translateY(-50%); z-index: 1500;
+    width: 22px; height: 46px; padding: 0; font-size: 14px;
+    display: grid; place-items: center;
+  }
+  .reveal-left { left: 0; border-radius: 0 8px 8px 0; }
+  .reveal-right { right: 0; border-radius: 8px 0 0 8px; }
+  h1 { font-size: 16px; margin: 0; letter-spacing: -0.2px; }
+  h1 span { color: var(--accent); font-weight: 400; }
+  .sub { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+
+  .load { padding: 12px 16px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+  .load .row { display: flex; gap: 8px; }
+  .load button, .load .btn { flex: 1; font-size: 12px; }
+
+  .strip { flex: 1; overflow-y: auto; padding: 8px; display: grid; gap: 5px; align-content: start; }
+  .card {
+    display: grid; grid-template-columns: 54px 1fr; gap: 9px; align-items: center;
+    padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg);
+    cursor: pointer; text-align: left;
+  }
+  .card:hover { border-color: #3a414d; }
+  .card.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .card img { width: 54px; height: 40px; object-fit: cover; border-radius: 4px; background: #000; display: block; }
+  .card .nm { font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .st { font-size: 10.5px; margin-top: 2px; display: flex; align-items: center; gap: 5px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .dot.placed { background: var(--ok); }
+  .dot.original { background: var(--warn); }
+  .dot.none { background: #55606f; }
+
+  .detail { padding: 12px 16px; display: grid; gap: 2px; align-content: start; }
+  .detail.empty { color: var(--muted); font-size: 12px; padding: 16px; }
+  .detail .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .detail .hint { font-size: 11px; color: var(--muted); line-height: 1.45; margin: 6px 0 0; }
+  .detail .mini { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .detail .mini button { font-size: 11px; padding: 5px 8px; flex: 1 1 auto; }
+  .detail .preview {
+    width: 100%; aspect-ratio: 4 / 3; object-fit: contain;
+    margin-top: 5px; border-radius: 6px; border: 1px solid var(--line);
+    background: #000; display: block; cursor: zoom-in;
+  }
+  .detail .preview-cap { font-size: 10.5px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+
+  .lightbox {
+    position: fixed; inset: 0; z-index: 2000; padding: 24px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    background: rgba(8,9,11,0.93); backdrop-filter: blur(2px); cursor: zoom-out;
+  }
+  .lightbox img { max-width: 100%; max-height: calc(100% - 52px); object-fit: contain; border-radius: 6px; }
+  .lightbox .lb-bar { display: flex; gap: 10px; align-items: center; }
+  .lightbox .lb-cap { font-size: 12px; color: var(--muted); }
+
+  .export { border-top: 1px solid var(--line); padding: 12px 16px; display: grid; gap: 8px; }
+  .export .status { font-size: 11.5px; color: var(--muted); min-height: 1.2em; }
+  .export .status.err { color: #ff6b6b; }
+  .export .status.ok { color: var(--ok); }
+
+  main { position: relative; min-height: 0; }
+  #map { position: absolute; inset: 0; background: #0d0f13; }
+  .maphint {
+    position: absolute; left: 12px; bottom: 12px; z-index: 500; max-width: 360px;
+    background: rgba(20,22,26,0.94); border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 12px; font-size: 11.5px; color: var(--muted); line-height: 1.5;
+    backdrop-filter: blur(6px);
+  }
+  .maphint b { color: var(--text); font-weight: 600; }
+  .maphint button { margin-top: 6px; font-size: 11px; padding: 4px 8px; }
+
+  .empty-state {
+    position: absolute; inset: 0; display: flex; flex-direction: column; gap: 6px;
+    align-items: center; justify-content: center; color: var(--muted); text-align: center; padding: 24px;
+  }
+
+  /* Leaflet dark */
+  .leaflet-container { background: #0d0f13; font: inherit; }
+  .leaflet-bar, .leaflet-control-layers { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .leaflet-bar a, .leaflet-control-layers-toggle { background: var(--panel); color: var(--text); border-bottom-color: var(--line); }
+  .leaflet-bar a:hover { background: #23272f; }
+  .leaflet-control-layers-expanded { background: var(--panel); color: var(--text); padding: 8px 10px; }
+  .leaflet-control-attribution { background: rgba(20,22,26,0.8); color: var(--muted); }
+  .leaflet-control-attribution a { color: var(--accent); }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  }
+  .leaflet-popup-content { margin: 9px 12px; }
+
+  .gt-pin { position: relative; width: 30px; height: 30px; display: grid; place-items: center; overflow: visible; }
+  .gt-pin .body { width: 14px; height: 14px; border-radius: 50%; background: var(--ok); border: 2.5px solid #101216; box-shadow: 0 1px 4px rgba(0,0,0,.6); }
+  .gt-pin.sel .body { background: var(--accent); box-shadow: 0 0 0 3px var(--accent), 0 1px 4px rgba(0,0,0,.6); }
+  .gt-pin .cone { position: absolute; left: 0; top: 0; transform-origin: 15px 15px; pointer-events: none; }
+  .gt-pin .cone path { fill: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .gt-orig { width: 12px; height: 12px; border-radius: 50%; border: 2px dashed var(--warn); box-sizing: border-box; opacity: 0.8; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside class="left">
+    <header>
+      <h1>Warmish <span>Geotag</span></h1>
+      <div class="sub">Posiziona a mano le foto FLIR/JPEG su una mappa e riscrivi le coordinate GPS negli EXIF. I dati termici non vengono toccati. Gli originali non vengono sovrascritti — l'output è uno ZIP.</div>
+      <button class="panel-toggle" id="collapseLeft" title="Comprimi il pannello" aria-label="Comprimi il pannello sinistro">‹</button>
+    </header>
+
+    <div class="load">
+      <div class="row">
+        <label class="btn" for="fileInput">Scegli foto…</label>
+        <label class="btn" for="folderInput">Scegli cartella…</label>
+      </div>
+      <input id="fileInput" type="file" accept="image/jpeg,.jpg,.jpeg" multiple class="vh" />
+      <input id="folderInput" type="file" webkitdirectory multiple class="vh" />
+      <div class="row">
+        <label class="btn" for="workInput" title="Riapri un lavoro salvato">Importa lavoro…</label>
+        <button id="exportWork" title="Salva le posizioni assegnate finora">Esporta lavoro</button>
+        <input id="workInput" type="file" accept=".json" class="vh" />
+      </div>
+    </div>
+
+    <div class="strip" id="strip"></div>
+
+    <div class="export">
+      <button class="primary" id="exportZip" disabled>Scarica ZIP geotaggato</button>
+      <div class="status" id="status"></div>
+    </div>
+  </aside>
+
+  <main>
+    <div id="map"></div>
+    <div class="empty-state" id="emptyState">
+      <p>Carica delle foto per iniziare.</p>
+      <small>Solo JPEG. Tutto avviene nel browser.</small>
+    </div>
+    <div class="maphint" id="mapHint" hidden>
+      <b>Clic</b> sulla mappa = posiziona la foto selezionata. Trascina il pallino per spostarlo.<br />
+      <b>Shift+clic</b> (o <b>clic destro</b>) su un punto = orienta la foto verso quel punto. La direzione si può anche digitare nel pannello a destra.<br />
+      Il cerchietto tratteggiato è la posizione originale della fotocamera.
+      <br /><button id="hideHint">Nascondi</button>
+    </div>
+    <button class="reveal reveal-left" id="showLeft" title="Mostra il pannello sinistro" aria-label="Mostra il pannello sinistro" hidden>›</button>
+    <button class="reveal reveal-right" id="showRight" title="Mostra il pannello destro" aria-label="Mostra il pannello destro" hidden>‹</button>
+  </main>
+
+  <aside class="right">
+    <div class="rhead">Anteprima e coordinate
+      <button class="panel-toggle" id="collapseRight" title="Comprimi il pannello" aria-label="Comprimi il pannello destro">›</button>
+    </div>
+    <div class="detail empty" id="detail">Nessuna foto selezionata.</div>
+  </aside>
+</div>
+
+<script src="lib/leaflet.js"></script>
+<script src="lib/piexif.js"></script>
+<script src="lib/fflate.js"></script>
+<script>
+"use strict";
+
+const G = piexif.GPSIFD;
+const LS_PREFIX = "warmish-geotag:";
+
+/** @type {{file:File, name:string, size:number, url:string, orig:?{lat:number,lon:number},
+ *          pos:?{lat:number,lon:number}, heading:?number, alt:?number, marker:?any, origMarker:?any}[]} */
+let items = [];
+let selected = -1;
+let folderName = "geotag";
+let map, baseSat, baseOsm;
+
+// ---------------------------------------------------------------- geometry
+function bearing(from, to) {
+  const rad = Math.PI / 180;
+  const flon = (from.lon ?? from.lng), tlon = (to.lon ?? to.lng);
+  const y = Math.sin((tlon - flon) * rad) * Math.cos(to.lat * rad);
+  const x = Math.cos(from.lat * rad) * Math.sin(to.lat * rad) -
+    Math.sin(from.lat * rad) * Math.cos(to.lat * rad) * Math.cos((tlon - flon) * rad);
+  return (Math.atan2(y, x) / rad + 360) % 360;
+}
+
+function toDmsRational(dec) {
+  dec = Math.abs(dec);
+  const d = Math.floor(dec);
+  const mf = (dec - d) * 60;
+  const m = Math.floor(mf);
+  const s = (mf - m) * 60;
+  return [[d, 1], [m, 1], [Math.round(s * 100000), 100000]];
+}
+
+/**
+ * Minimal GPS reader over the standard "Exif\0\0" APP1, so we can peek at a
+ * file's original coordinates from just its head — piexif.load needs a whole,
+ * well-formed JPEG and chokes on the truncated slice or the big FLIR blocks.
+ */
+function readGpsFromBytes(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (dv.getUint16(0) !== 0xffd8) return null;
+  let p = 2, tiffStart = -1;
+  while (p + 4 <= bytes.length) {
+    if (bytes[p] !== 0xff) { p++; continue; }
+    const marker = bytes[p + 1];
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { p += 2; continue; }
+    if (marker === 0xda || marker === 0xd9) break;
+    const len = dv.getUint16(p + 2);
+    if (marker === 0xe1 && p + 10 < bytes.length &&
+        String.fromCharCode(bytes[p + 4], bytes[p + 5], bytes[p + 6], bytes[p + 7]) === 'Exif' && bytes[p + 8] === 0) {
+      tiffStart = p + 10; break;
+    }
+    p += 2 + len;
+  }
+  if (tiffStart < 0 || tiffStart + 8 > bytes.length) return null;
+  const le = bytes[tiffStart] === 0x49;
+  const u16 = (o) => dv.getUint16(tiffStart + o, le);
+  const u32 = (o) => dv.getUint32(tiffStart + o, le);
+  if (u16(2) !== 42) return null;
+  const ifd0 = u32(4);
+  if (ifd0 < 8 || tiffStart + ifd0 + 2 > bytes.length) return null;
+  let gpsOff = 0;
+  const n0 = u16(ifd0);
+  for (let i = 0; i < n0; i++) {
+    const e = ifd0 + 2 + i * 12;
+    if (tiffStart + e + 12 > bytes.length) break;
+    if (u16(e) === 0x8825) { gpsOff = u32(e + 8); break; }
+  }
+  if (gpsOff < 8 || tiffStart + gpsOff + 2 > bytes.length) return null;
+  const nG = u16(gpsOff);
+  const tag = {};
+  for (let i = 0; i < nG; i++) {
+    const e = gpsOff + 2 + i * 12;
+    if (tiffStart + e + 12 > bytes.length) break;
+    const type = u16(e + 2), num = u32(e + 4);
+    const size = ({ 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 })[type] || 0;
+    if (!size) continue;
+    const bytesLen = size * num;
+    const off = bytesLen <= 4 ? e + 8 : u32(e + 8);
+    if (tiffStart + off + bytesLen > bytes.length) continue;
+    tag[u16(e)] = { type, num, off };
+  }
+  const rat = (o) => { const n = dv.getUint32(tiffStart + o, le), d = dv.getUint32(tiffStart + o + 4, le); return d ? n / d : 0; };
+  const dms = (t) => t && t.type === 5 && t.num >= 3 ? rat(t.off) + rat(t.off + 8) / 60 + rat(t.off + 16) / 3600 : null;
+  const ascii = (t) => { if (!t) return ''; let s = ''; for (let i = 0; i < t.num; i++) { const c = bytes[tiffStart + t.off + i]; if (!c) break; s += String.fromCharCode(c); } return s.trim(); };
+  let lat = dms(tag[2]), lon = dms(tag[4]);
+  if (lat == null || lon == null) return null;
+  if (ascii(tag[1]).toUpperCase().startsWith('S')) lat = -lat;
+  if (ascii(tag[3]).toUpperCase().startsWith('W')) lon = -lon;
+  if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { lat, lon };
+}
+
+// ---------------------------------------------------------------- FLIR embedded visible image
+function flirStr(b, o, n) { let s = ""; for (let i = 0; i < n; i++) s += String.fromCharCode(b[o + i]); return s; }
+
+/**
+ * Pulls the embedded visible-light JPEG out of a FLIR file. FLIR splits an "FFF"
+ * container across the JPEG's FLIR-tagged APP1 segments; record type 14 is the
+ * visible photo. Returns its bytes, or null for a plain JPEG with no such record.
+ */
+function extractFlirVisible(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (dv.getUint16(0) !== 0xffd8) return null;
+  const chunks = [];
+  let p = 2;
+  while (p + 4 <= bytes.length) {
+    if (bytes[p] !== 0xff) { p++; continue; }
+    const marker = bytes[p + 1];
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { p += 2; continue; }
+    if (marker === 0xda || marker === 0xd9) break;
+    const len = dv.getUint16(p + 2);
+    const seg = bytes.subarray(p + 4, p + 2 + len);
+    if (marker === 0xe1 && seg.length > 8 && flirStr(seg, 0, 4) === "FLIR") {
+      chunks.push({ index: seg[6], data: seg.subarray(8) });
+    }
+    p += 2 + len;
+  }
+  if (!chunks.length) return null;
+  chunks.sort((a, b) => a.index - b.index);
+  let total = 0; for (const c of chunks) total += c.data.length;
+  const fff = new Uint8Array(total);
+  let o = 0; for (const c of chunks) { fff.set(c.data, o); o += c.data.length; }
+  if (flirStr(fff, 0, 4) !== "FFF\0") return null;
+
+  const fdv = new DataView(fff.buffer, fff.byteOffset, fff.byteLength);
+  const indexOffset = fdv.getUint32(0x18);
+  const count = fdv.getUint32(0x1c);
+  for (let i = 0; i < count; i++) {
+    const e = indexOffset + i * 32;
+    if (e + 32 > fff.length) break;
+    if (fdv.getUint16(e) !== 14) continue; // record type 14 = embedded image
+    const off = fdv.getUint32(e + 12), length = fdv.getUint32(e + 16);
+    if (!length || off + length > fff.length) continue;
+    const body = fff.subarray(off + 0x20, off + length);
+    if (body[0] === 0xff && body[1] === 0xd8) return body;
+  }
+  return null;
+}
+
+/** Decode the embedded visible photo for one item (once), then refresh the strip and panel. */
+async function ensureVisible(it) {
+  if (it.visibleUrl !== undefined) return;
+  it.visibleUrl = null; // attempted — don't retry on every re-render
+  try {
+    const jpg = extractFlirVisible(new Uint8Array(await it.file.arrayBuffer()));
+    if (jpg) it.visibleUrl = URL.createObjectURL(new Blob([jpg], { type: "image/jpeg" }));
+  } catch (_) {}
+  if (it.visibleUrl) {
+    renderStrip();
+    if (items[selected] === it) renderDetail();
+  }
+}
+
+/** Fill in the visible photos for the whole strip, one file at a time, without blocking. */
+async function sweepVisibles() {
+  const gen = items;
+  for (const it of gen) {
+    if (items !== gen) return; // a new folder was loaded — abandon this sweep
+    await ensureVisible(it);
+    await new Promise((r) => setTimeout(r, 0)); // let the UI breathe between files
+  }
+}
+
+function openLightbox(it) {
+  const isVis = !!it.visibleUrl;
+  const box = document.createElement("div");
+  box.className = "lightbox";
+  box.innerHTML =
+    `<img src="${isVis ? it.visibleUrl : it.url}" alt="${escapeHtml(it.name)}" />` +
+    `<div class="lb-bar"><span class="lb-cap">${escapeHtml(it.name)} — ${isVis ? "foto visibile" : "anteprima termica"}</span>` +
+    `<button id="lbClose">Chiudi (Esc)</button></div>`;
+  const close = () => { box.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  box.addEventListener("click", (e) => { if (e.target === box || e.target.id === "lbClose") close(); });
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(box);
+}
+
+// ---------------------------------------------------------------- map
+function initMap() {
+  map = L.map("map", { zoomControl: true, worldCopyJump: true, boxZoom: false });
+  map.boxZoom.disable(); // shift is ours — used to set a photo's direction
+  map.setView([42.8551, 13.577], 15);
+
+  baseSat = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { maxZoom: 21, maxNativeZoom: 19, attribution: "Tiles &copy; Esri, Maxar, Earthstar Geographics" },
+  );
+  baseOsm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" });
+  baseSat.addTo(map);
+  L.control.layers({ "Satellite": baseSat, "Mappa stradale": baseOsm }, {}, { position: "topright" }).addTo(map);
+
+  const setHeadingTo = (latlng) => {
+    if (selected < 0) return;
+    const it = items[selected];
+    if (!it.pos) return;
+    const h = Math.round(bearing(it.pos, latlng) * 10) / 10;
+    if (!isFinite(h)) return;
+    it.heading = h;
+    commit(it);
+  };
+
+  map.on("click", (e) => {
+    if (selected < 0) return;
+    const it = items[selected];
+    if (e.originalEvent.shiftKey) {
+      setHeadingTo(e.latlng);
+    } else {
+      it.pos = { lat: +e.latlng.lat.toFixed(7), lon: +e.latlng.lng.toFixed(7) };
+      commit(it);
+    }
+  });
+  // Right-click also sets the direction, for anyone without a comfy Shift+click.
+  map.on("contextmenu", (e) => { e.originalEvent.preventDefault(); setHeadingTo(e.latlng); });
+}
+
+function pinIcon(it, isSel) {
+  const cone = it.heading != null
+    ? `<svg class="cone" style="transform:rotate(${it.heading}deg)" width="30" height="30" viewBox="0 0 30 30"><path d="M15 15 L8 -7 L22 -7 Z"/></svg>`
+    : "";
+  return L.divIcon({
+    className: "",
+    html: `<div class="gt-pin${isSel ? " sel" : ""}">${cone}<span class="body"></span></div>`,
+    iconSize: [30, 30], iconAnchor: [15, 15], popupAnchor: [0, -14],
+  });
+}
+
+function refreshItem(it) {
+  // original-camera-position ghost marker
+  if (it.orig && !it.origMarker) {
+    it.origMarker = L.marker([it.orig.lat, it.orig.lon], {
+      icon: L.divIcon({ className: "", html: `<span class="gt-orig"></span>`, iconSize: [12, 12], iconAnchor: [6, 6] }),
+      interactive: false, keyboard: false, zIndexOffset: -500,
+    }).addTo(map).bindTooltip("posizione originale della fotocamera");
+  }
+
+  if (!it.pos) {
+    if (it.marker) { map.removeLayer(it.marker); it.marker = null; }
+    return;
+  }
+  const ll = [it.pos.lat, it.pos.lon];
+  const isSel = items[selected] === it;
+  if (!it.marker) {
+    it.marker = L.marker(ll, { icon: pinIcon(it, isSel), draggable: true }).addTo(map);
+    it.marker.on("dragend", () => {
+      const p = it.marker.getLatLng();
+      it.pos = { lat: +p.lat.toFixed(7), lon: +p.lng.toFixed(7) };
+      saveItem(it); renderDetail();
+    });
+    it.marker.on("click", () => { selectItem(items.indexOf(it)); });
+  } else {
+    it.marker.setLatLng(ll);
+    it.marker.setIcon(pinIcon(it, isSel));
+  }
+  // Keep the selected pin on top and grabbable even when many are stacked.
+  it.marker.setZIndexOffset(isSel ? 1000 : 0);
+  it.marker.bindPopup(it.name);
+}
+
+function fitToMarkers() {
+  const pts = [];
+  for (const it of items) {
+    if (it.pos) pts.push([it.pos.lat, it.pos.lon]);
+    else if (it.orig) pts.push([it.orig.lat, it.orig.lon]);
+  }
+  if (pts.length === 1) map.setView(pts[0], 17);
+  else if (pts.length > 1) map.fitBounds(L.latLngBounds(pts).pad(0.2), { maxZoom: 18 });
+}
+
+// ---------------------------------------------------------------- persistence
+function keyFor(it) { return LS_PREFIX + it.name + ":" + it.size; }
+function saveItem(it) {
+  try {
+    localStorage.setItem(keyFor(it), JSON.stringify({ pos: it.pos, heading: it.heading, alt: it.alt }));
+  } catch (_) {}
+}
+function loadItem(it) {
+  try {
+    const raw = localStorage.getItem(keyFor(it));
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    it.pos = s.pos || null;
+    it.heading = (s.heading ?? null);
+    it.alt = (s.alt ?? null);
+  } catch (_) {}
+}
+
+// ---------------------------------------------------------------- load files
+async function ingest(fileList) {
+  const files = Array.from(fileList).filter((f) => /\.jpe?g$/i.test(f.name));
+  if (!files.length) { setStatus("Nessun JPEG trovato.", "err"); return; }
+  files.sort((a, b) => a.name.localeCompare(b.name));
+
+  const rel = files[0].webkitRelativePath || "";
+  folderName = rel.includes("/") ? rel.split("/")[0] : "geotag";
+
+  for (const it of items) {
+    if (it.marker) map.removeLayer(it.marker);
+    if (it.origMarker) map.removeLayer(it.origMarker);
+    URL.revokeObjectURL(it.url);
+    if (it.visibleUrl) URL.revokeObjectURL(it.visibleUrl);
+  }
+  items = [];
+
+  for (const file of files) {
+    const it = {
+      file, name: file.name, size: file.size, url: URL.createObjectURL(file),
+      orig: null, pos: null, heading: null, alt: null, marker: null, origMarker: null,
+      visibleUrl: undefined, // undefined = not yet decoded, null = none, string = blob URL
+    };
+    // read the camera's own GPS from the file head (see readGpsFromBytes)
+    try {
+      const head = new Uint8Array(await file.slice(0, 256 * 1024).arrayBuffer());
+      it.orig = readGpsFromBytes(head);
+    } catch (_) {}
+    loadItem(it);
+    items.push(it);
+  }
+
+  document.getElementById("emptyState").hidden = true;
+  try { if (localStorage.getItem("warmish-geotag:hint") !== "0") document.getElementById("mapHint").hidden = false; }
+  catch (_) { document.getElementById("mapHint").hidden = false; }
+  document.getElementById("exportZip").disabled = false;
+  items.forEach(refreshItem);
+  renderStrip();
+  selectItem(0);
+  fitToMarkers();
+  setStatus(`${items.length} foto caricate. ${items.filter((i) => i.pos).length} già posizionate.`);
+  sweepVisibles(); // pull the embedded visible photos in the background
+}
+
+function readDataUrl(blob) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = () => rej(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+
+// ---------------------------------------------------------------- UI render
+function renderStrip() {
+  const strip = document.getElementById("strip");
+  strip.innerHTML = "";
+  items.forEach((it, i) => {
+    const el = document.createElement("button");
+    el.className = "card" + (i === selected ? " sel" : "");
+    const state = it.pos ? ["placed", "posizionata"] : it.orig ? ["original", "solo posizione originale"] : ["none", "da posizionare"];
+    el.innerHTML =
+      `<img src="${it.visibleUrl || it.url}" alt="" loading="lazy" />` +
+      `<div><div class="nm">${escapeHtml(it.name)}</div>` +
+      `<div class="st"><span class="dot ${state[0]}"></span>${state[1]}${it.heading != null ? " · " + Math.round(it.heading) + "°" : ""}</div></div>`;
+    el.addEventListener("click", () => selectItem(i));
+    strip.appendChild(el);
+  });
+}
+
+function renderDetail() {
+  const d = document.getElementById("detail");
+  if (selected < 0) { d.className = "detail empty"; d.textContent = "Nessuna foto selezionata."; return; }
+  const it = items[selected];
+  d.className = "detail";
+  const hasVis = !!it.visibleUrl;
+  const cap = hasVis
+    ? "Foto visibile incorporata nel file FLIR — clic per ingrandire."
+    : it.visibleUrl === undefined
+      ? "Cerco la foto visibile…"
+      : "Il file non contiene una foto visibile: qui sotto l'anteprima termica — clic per ingrandire.";
+  d.innerHTML = `
+    <label>Foto</label>
+    <div class="nm" style="font-size:12px;word-break:break-all">${escapeHtml(it.name)}</div>
+    <img class="preview" id="fPreview" src="${hasVis ? it.visibleUrl : it.url}" alt="Anteprima di ${escapeHtml(it.name)}" />
+    <div class="preview-cap">${cap}</div>
+    <div class="grid2">
+      <div><label>Latitudine</label><input type="number" step="0.000001" id="fLat" value="${it.pos ? it.pos.lat : ""}" /></div>
+      <div><label>Longitudine</label><input type="number" step="0.000001" id="fLon" value="${it.pos ? it.pos.lon : ""}" /></div>
+    </div>
+    <div class="grid2">
+      <div><label>Direzione (°)</label><input type="number" step="1" min="0" max="360" id="fHead" value="${it.heading ?? ""}" placeholder="—" /></div>
+      <div><label>Altitudine (m)</label><input type="number" step="1" id="fAlt" value="${it.alt ?? ""}" placeholder="opzionale" /></div>
+    </div>
+    <div class="mini">
+      <button id="useOrig" ${it.orig ? "" : "disabled"}>Usa posizione originale</button>
+      <button id="clearPos" ${it.pos ? "" : "disabled"}>Cancella</button>
+    </div>
+    <div class="mini">
+      <button id="copyEmpty" ${it.pos ? "" : "disabled"}>Copia posizione → foto non posizionate</button>
+    </div>
+    <div class="mini">
+      <button id="copyAll" ${it.pos ? "" : "disabled"}>Copia posizione → tutte</button>
+    </div>
+    <p class="hint">Digita lat/lon e premi Invio (o esci dal campo) per applicare. Shortcut: ↑ / ↓ per cambiare foto. Shift+clic sulla mappa per la direzione.</p>
+  `;
+  const bind = (id, fn) => {
+    const e = document.getElementById(id);
+    if (!e) return;
+    e.addEventListener("change", fn);
+    // Invio applica subito, senza dover uscire dal campo con Tab o un clic.
+    e.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); fn(ev); } });
+  };
+  bind("fLat", commitLatLon); bind("fLon", commitLatLon);
+  bind("fHead", (e) => { it.heading = e.target.value === "" ? null : (((+e.target.value % 360) + 360) % 360); commit(it); });
+  bind("fAlt", (e) => { it.alt = e.target.value === "" ? null : +e.target.value; commit(it); });
+  const prev = document.getElementById("fPreview");
+  if (prev) prev.addEventListener("click", () => openLightbox(it));
+  ensureVisible(it);
+  const click = (id, fn) => { const e = document.getElementById(id); if (e) e.addEventListener("click", fn); };
+  click("useOrig", () => { it.pos = { lat: +it.orig.lat.toFixed(7), lon: +it.orig.lon.toFixed(7) }; commit(it); map.panTo([it.pos.lat, it.pos.lon]); });
+  click("clearPos", () => { it.pos = null; it.heading = null; commit(it); });
+  click("copyEmpty", () => copyPosition(it, false));
+  click("copyAll", () => copyPosition(it, true));
+
+  function commitLatLon() {
+    const la = parseFloat(document.getElementById("fLat").value);
+    const lo = parseFloat(document.getElementById("fLon").value);
+    if (isFinite(la) && isFinite(lo)) it.pos = { lat: la, lon: lo };
+    commit(it);
+  }
+}
+
+function commit(it) { saveItem(it); refreshItem(it); renderStrip(); renderDetail(); }
+
+function copyPosition(src, all) {
+  if (!src.pos) return;
+  let n = 0;
+  for (const it of items) {
+    if (it === src) continue;
+    if (!all && it.pos) continue;
+    it.pos = { lat: src.pos.lat, lon: src.pos.lon };
+    saveItem(it); refreshItem(it); n++;
+  }
+  renderStrip(); renderDetail();
+  setStatus(`Posizione copiata su ${n} foto.`);
+}
+
+function selectItem(i) {
+  selected = i;
+  items.forEach(refreshItem);
+  renderStrip();
+  renderDetail();
+  const it = items[i];
+  if (it && it.pos) map.panTo([it.pos.lat, it.pos.lon]);
+  else if (it && it.orig) map.panTo([it.orig.lat, it.orig.lon]);
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function setStatus(msg, kind) {
+  const el = document.getElementById("status");
+  el.textContent = msg || "";
+  el.className = "status" + (kind ? " " + kind : "");
+}
+
+// ---------------------------------------------------------------- EXIF write + export
+async function writeGps(file, it) {
+  const dataUrl = await readDataUrl(file);
+  let exifObj;
+  try { exifObj = piexif.load(dataUrl); }
+  catch (_) { exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": null }; }
+
+  const gps = {};
+  gps[G.GPSVersionID] = [2, 3, 0, 0];
+  gps[G.GPSLatitudeRef] = it.pos.lat < 0 ? "S" : "N";
+  gps[G.GPSLatitude] = toDmsRational(it.pos.lat);
+  gps[G.GPSLongitudeRef] = it.pos.lon < 0 ? "W" : "E";
+  gps[G.GPSLongitude] = toDmsRational(it.pos.lon);
+  gps[G.GPSMapDatum] = "WGS84";
+  if (it.alt != null && isFinite(it.alt)) {
+    gps[G.GPSAltitudeRef] = it.alt < 0 ? 1 : 0;
+    gps[G.GPSAltitude] = [Math.round(Math.abs(it.alt) * 1000), 1000];
+  }
+  if (it.heading != null && isFinite(it.heading)) {
+    gps[G.GPSImgDirectionRef] = "T";
+    gps[G.GPSImgDirection] = [Math.round((((it.heading % 360) + 360) % 360) * 100), 100];
+  }
+  exifObj.GPS = gps;
+
+  const out = piexif.insert(piexif.dump(exifObj), dataUrl);
+  const b64 = out.slice(out.indexOf(",") + 1);
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+
+async function exportZip() {
+  const placed = items.filter((i) => i.pos);
+  if (!placed.length) { setStatus("Nessuna foto posizionata.", "err"); return; }
+  document.getElementById("exportZip").disabled = true;
+
+  const zip = {};
+  const csv = ["file,lat,lon,heading_deg,altitude_m"];
+  const errors = [];
+  let done = 0;
+
+  for (const it of items) {
+    setStatus(`Scrittura EXIF… ${++done}/${items.length}`);
+    await new Promise((r) => setTimeout(r)); // let the UI breathe
+    try {
+      if (it.pos) {
+        zip[it.name] = await writeGps(it.file, it);
+        csv.push(`${csvCell(it.name)},${it.pos.lat},${it.pos.lon},${it.heading ?? ""},${it.alt ?? ""}`);
+      } else {
+        zip[it.name] = new Uint8Array(await it.file.arrayBuffer()); // untouched original
+      }
+    } catch (e) {
+      errors.push(`${it.name}: ${e && e.message ? e.message : e}`);
+      zip[it.name] = new Uint8Array(await it.file.arrayBuffer());
+    }
+  }
+  zip["geotag.csv"] = fflate.strToU8(csv.join("\n") + "\n");
+  if (errors.length) zip["_errori.txt"] = fflate.strToU8(errors.join("\n") + "\n");
+
+  setStatus("Compressione…");
+  const bytes = fflate.zipSync(zip, { level: 0 });
+  downloadBlob(new Blob([bytes], { type: "application/zip" }), folderName + "_geotag.zip");
+
+  document.getElementById("exportZip").disabled = false;
+  setStatus(
+    `Fatto: ${placed.length} foto geotaggate, ${items.length - placed.length} invariate` +
+    (errors.length ? `, ${errors.length} errori (vedi _errori.txt)` : "") + ".",
+    errors.length ? "err" : "ok",
+  );
+}
+
+function csvCell(s) { return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+
+function downloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ---------------------------------------------------------------- work file
+function exportWork() {
+  const data = {
+    warmish_geotag: 1,
+    saved: new Date().toISOString(),
+    items: items.map((it) => ({ name: it.name, size: it.size, pos: it.pos, heading: it.heading, alt: it.alt })),
+  };
+  downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), folderName + "_geotag-lavoro.json");
+}
+async function importWork(file) {
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data || !Array.isArray(data.items)) throw new Error("file non valido");
+    const byName = new Map(data.items.map((r) => [r.name, r]));
+    let n = 0;
+    for (const it of items) {
+      const r = byName.get(it.name);
+      if (!r) continue;
+      it.pos = r.pos || null; it.heading = r.heading ?? null; it.alt = r.alt ?? null;
+      saveItem(it); refreshItem(it); n++;
+    }
+    renderStrip(); renderDetail(); fitToMarkers();
+    setStatus(`Lavoro importato: ${n} foto aggiornate.`);
+  } catch (e) {
+    setStatus("Import fallito: " + (e.message || e), "err");
+  }
+}
+
+// ---------------------------------------------------------------- wire up
+initMap();
+// The three file pickers are opened by <label for>, so they work even on
+// file:// and in browsers that block .click() on hidden inputs.
+document.getElementById("fileInput").addEventListener("change", (e) => e.target.files.length && ingest(e.target.files));
+document.getElementById("folderInput").addEventListener("change", (e) => e.target.files.length && ingest(e.target.files));
+document.getElementById("exportZip").addEventListener("click", exportZip);
+document.getElementById("exportWork").addEventListener("click", exportWork);
+document.getElementById("workInput").addEventListener("change", (e) => e.target.files[0] && importWork(e.target.files[0]));
+document.getElementById("hideHint").addEventListener("click", () => {
+  document.getElementById("mapHint").hidden = true;
+  try { localStorage.setItem("warmish-geotag:hint", "0"); } catch (_) {}
+});
+
+// ---------------------------------------------------------------- collapsible sidebars
+let panels = (() => {
+  try { return Object.assign({ left: false, right: false }, JSON.parse(localStorage.getItem("warmish-geotag:panels") || "{}")); }
+  catch (_) { return { left: false, right: false }; }
+})();
+function applyPanels() {
+  const app = document.getElementById("app");
+  app.classList.toggle("lc", panels.left);
+  app.classList.toggle("rc", panels.right);
+  document.getElementById("showLeft").hidden = !panels.left;
+  document.getElementById("showRight").hidden = !panels.right;
+  try { localStorage.setItem("warmish-geotag:panels", JSON.stringify(panels)); } catch (_) {}
+  // The map container just changed size — Leaflet needs to be told, after the transition.
+  if (map) setTimeout(() => map.invalidateSize(), 200);
+}
+const setPanel = (side, on) => { panels[side] = on; applyPanels(); };
+document.getElementById("collapseLeft").addEventListener("click", () => setPanel("left", true));
+document.getElementById("showLeft").addEventListener("click", () => setPanel("left", false));
+document.getElementById("collapseRight").addEventListener("click", () => setPanel("right", true));
+document.getElementById("showRight").addEventListener("click", () => setPanel("right", false));
+applyPanels();
+
+window.addEventListener("keydown", (e) => {
+  if (["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName)) return;
+  if (document.querySelector(".lightbox")) return; // arrows shouldn't move the strip behind the lightbox
+  if (!items.length) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); selectItem(Math.min(items.length - 1, selected + 1)); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); selectItem(Math.max(0, selected - 1)); }
+});
+
+window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("drop", (e) => { e.preventDefault(); if (e.dataTransfer.files.length) ingest(e.dataTransfer.files); });
+</script>
+</body>
+</html>

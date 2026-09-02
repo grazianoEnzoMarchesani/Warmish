@@ -1,0 +1,21 @@
+{
+  "pages": [
+    { "id": "page-1", "name": "Proposta" },
+    { "id": "page-2", "name": "Alternative valutate" }
+  ],
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 880, "h": 1720, "page": "page-1", "print": "flow", "title": "Callout collegato" },
+    { "file": "Collisioni.dc.html", "x": 1000, "y": 0, "w": 900, "h": 820, "page": "page-1" },
+    { "file": "A.dc.html", "x": 0, "y": 0, "w": 640, "h": 560, "page": "page-2" },
+    { "file": "B.dc.html", "x": 760, "y": 0, "w": 640, "h": 560, "page": "page-2" },
+    { "file": "D.dc.html", "x": 1520, "y": 0, "w": 640, "h": 560, "page": "page-2" },
+    { "file": "E.dc.html", "x": 2280, "y": 0, "w": 640, "h": 560, "page": "page-2" }
+  ],
+  "annotations": [
+    { "id": "note-pick", "x": 0, "y": -96, "w": 420, "page": "page-1",
+      "text": "Direzione scelta: C — Callout collegato.\nRegola ferma: le etichette non si sovrappongono mai (né tra loro né sulle ROI)." },
+    { "id": "note-alts", "x": 0, "y": -96, "w": 420, "page": "page-2",
+      "text": "Non scelte, tenute come riferimento: riga essenziale (A), pillole (B), readout strumento (D), etichetta a staffa (E)." }
+  ],
+  "launch": { "view": "canvas", "page": "page-1" }
+}

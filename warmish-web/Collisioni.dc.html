@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #14161a; color: #e6e8ec;
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    a { color: #ff8a3d; } a:hover { color: #ffa566; }
+    .wrap { padding: 32px 36px 40px; }
+    .kicker { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: #9aa2ae; }
+    h1 { font-size: 25px; margin: 8px 0 0; font-weight: 650; letter-spacing: -.015em; }
+    .lead { font-size: 13px; line-height: 1.6; color: #b8bec9; max-width: 68ch; margin: 12px 0 0; }
+    .lead b { color: #e6e8ec; font-weight: 600; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .pair { display: flex; gap: 28px; margin-top: 26px; }
+    .col { width: 400px; }
+    .col h2 { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; margin: 0 0 10px;
+      font-weight: 600; }
+    .col.bad h2 { color: #e0705f; }
+    .col.good h2 { color: #5fb98a; }
+    .scene { position: relative; width: 400px; height: 360px; border-radius: 12px; overflow: hidden;
+      border: 1px solid #2c313a;
+      background: linear-gradient(130deg, #ecd64d, #c9a83a 46%, #7c8c3b); }
+    .scene::after { content: ""; position: absolute; inset: 0;
+      background: radial-gradient(120px 90px at 30% 26%, rgba(255,150,40,.5), transparent),
+                  radial-gradient(150px 110px at 74% 78%, rgba(255,90,40,.4), transparent),
+                  radial-gradient(90px 70px at 60% 40%, rgba(255,180,60,.35), transparent); }
+    .caption { font-size: 11.5px; color: #9aa2ae; line-height: 1.55; margin-top: 12px; }
+    .caption b { color: #cdd2da; font-weight: 600; }
+
+    /* ROI shapes */
+    .roi { position: absolute; border: 2px solid; border-radius: 50%; }
+    .roi.rect { border-radius: 3px; }
+    .roi .x { position: absolute; inset: 0; }
+    .roi .x::before, .roi .x::after { content: ""; position: absolute; background: currentColor; }
+    .roi .x::before { left: 50%; top: 50%; width: 1px; height: 9px; transform: translate(-50%,-50%); }
+    .roi .x::after { left: 50%; top: 50%; width: 9px; height: 1px; transform: translate(-50%,-50%); }
+
+    /* BEFORE — current flat label */
+    .old { position: absolute; background: rgba(0,0,0,.56); color: #fff; padding: 3px 5px;
+      font-size: 10px; line-height: 1.32; white-space: nowrap; border-radius: 2px; }
+    .old .l2 { color: #e7e9ec; }
+
+    /* AFTER — callout label */
+    .cl { position: absolute; display: flex; background: rgba(9,11,15,.9); border-radius: 6px;
+      overflow: hidden; font-size: 10px; box-shadow: 0 2px 9px rgba(0,0,0,.4); z-index: 5; }
+    .cl .sp { width: 3px; flex: none; }
+    .cl .bd { padding: 4px 8px 5px; }
+    .cl .hn { font-weight: 650; }
+    .cl .gg { color: #d7dbe1; margin-top: 2px; letter-spacing: .02em; }
+    svg.leads { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+  </style>
+</helmet>
+<div class="wrap">
+  <div class="kicker">Warmish · overlay ROI · verifica regola</div>
+  <h1>Collisioni — nessuna sovrapposizione</h1>
+  <p class="lead">Stessa scena, cinque ROI ravvicinate. A sinistra il comportamento attuale: ogni
+  etichetta ancorata all'angolo della sua area, e con le aree vicine i riquadri si <b>accavallano</b> in
+  una pila illeggibile. A destra il callout collegato con risolutore di collisioni: i cartellini
+  scivolano verso lo spazio libero, <b>non si toccano mai</b>, e la linea di richiamo dice a quale ROI
+  appartiene ciascuno.</p>
+
+  <div class="pair">
+    <!-- ================= BEFORE ================= -->
+    <div class="col bad">
+      <h2>Comportamento attuale</h2>
+      <div class="scene">
+        <div class="roi" style="left:84px;  top:69px;  width:52px; height:52px; color:#ee3f3f"><div class="x"></div></div>
+        <div class="roi" style="left:213px; top:48px;  width:44px; height:44px; color:#c9d838"><div class="x"></div></div>
+        <div class="roi" style="left:296px; top:126px; width:48px; height:48px; color:#5fe04a"><div class="x"></div></div>
+        <div class="roi rect" style="left:150px; top:195px; width:65px; height:60px; color:#3ee0a9"><div class="x"></div></div>
+        <div class="roi" style="left:258px; top:233px; width:44px; height:44px; color:#3e7ee0"><div class="x"></div></div>
+
+        <div class="old" style="left:40px; top:40px;">Spot_1 | &epsilon; 0.950<div class="l2">min 33.98 | max 45.61 | mean 37.26</div></div>
+        <div class="old" style="left:96px; top:60px;">Spot_2 | &epsilon; 0.950<div class="l2">min 28.10 | max 39.44 | mean 31.02</div></div>
+        <div class="old" style="left:158px; top:36px;">Spot_3 | &epsilon; 0.950<div class="l2">min 30.77 | max 41.19 | mean 34.51</div></div>
+        <div class="old" style="left:92px; top:150px;">Area_1 | &epsilon; 0.950<div class="l2">min 26.44 | max 48.03 | mean 33.90</div></div>
+        <div class="old" style="left:150px; top:176px;">Spot_4 | &epsilon; 0.950<div class="l2">min 31.60 | max 44.98 | mean 36.15</div></div>
+      </div>
+      <p class="caption"><b>Il problema.</b> Cinque etichette, tre illeggibili. Nessuna sa dove sono le
+      altre, quindi si sommano nell'angolo in alto a sinistra del gruppo.</p>
+    </div>
+
+    <!-- ================= AFTER ================= -->
+    <div class="col good">
+      <h2>Callout con risolutore</h2>
+      <div class="scene">
+        <svg class="leads" viewBox="0 0 400 360" fill="none" stroke-width="1.4">
+          <g stroke="#ee3f3f"><line x1="130" y1="39" x2="110" y2="95"/><circle cx="110" cy="95" r="2.6" fill="#ee3f3f" stroke="none"/></g>
+          <g stroke="#c9d838"><line x1="270" y1="27" x2="235" y2="70"/><circle cx="235" cy="70" r="2.6" fill="#c9d838" stroke="none"/></g>
+          <g stroke="#5fe04a"><line x1="331" y1="300" x2="320" y2="150"/><circle cx="320" cy="150" r="2.6" fill="#5fe04a" stroke="none"/></g>
+          <g stroke="#3ee0a9"><line x1="126" y1="298" x2="182" y2="225"/><circle cx="182" cy="225" r="2.6" fill="#3ee0a9" stroke="none"/></g>
+          <g stroke="#3e7ee0"><line x1="209" y1="322" x2="280" y2="255"/><circle cx="280" cy="255" r="2.6" fill="#3e7ee0" stroke="none"/></g>
+        </svg>
+
+        <div class="roi" style="left:84px;  top:69px;  width:52px; height:52px; color:#ee3f3f"><div class="x"></div></div>
+        <div class="roi" style="left:213px; top:48px;  width:44px; height:44px; color:#c9d838"><div class="x"></div></div>
+        <div class="roi" style="left:296px; top:126px; width:48px; height:48px; color:#5fe04a"><div class="x"></div></div>
+        <div class="roi rect" style="left:150px; top:195px; width:65px; height:60px; color:#3ee0a9"><div class="x"></div></div>
+        <div class="roi" style="left:258px; top:233px; width:44px; height:44px; color:#3e7ee0"><div class="x"></div></div>
+
+        <div class="cl" style="left:12px;  top:26px;"><div class="sp" style="background:#ee3f3f"></div><div class="bd"><div class="hn" style="color:#ff8a3d">Spot_1</div><div class="gg mono">33.98 · 37.26 · 45.61</div></div></div>
+        <div class="cl" style="left:270px; top:13px;"><div class="sp" style="background:#c9d838"></div><div class="bd"><div class="hn" style="color:#ff8a3d">Spot_2</div><div class="gg mono">28.10 · 31.02 · 39.44</div></div></div>
+        <div class="cl" style="left:272px; top:299px;"><div class="sp" style="background:#5fe04a"></div><div class="bd"><div class="hn" style="color:#ff8a3d">Spot_3</div><div class="gg mono">30.77 · 34.51 · 41.19</div></div></div>
+        <div class="cl" style="left:6px;   top:284px;"><div class="sp" style="background:#3ee0a9"></div><div class="bd"><div class="hn" style="color:#ff8a3d">Area_1</div><div class="gg mono">26.44 · 33.90 · 48.03</div></div></div>
+        <div class="cl" style="left:148px; top:322px;"><div class="sp" style="background:#3e7ee0"></div><div class="bd"><div class="hn" style="color:#ff8a3d">Spot_4</div><div class="gg mono">31.60 · 36.15 · 44.98</div></div></div>
+      </div>
+      <p class="caption"><b>La soluzione.</b> Ogni cartellino è collocato nel primo spazio libero attorno
+      alla sua ROI; i rettangoli sono testati a coppie e contro le aree. La linea di richiamo è l'unico
+      tratto sull'immagine.</p>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; background: #14161a; color: #e6e8ec;
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    a { color: #ff8a3d; } a:hover { color: #ffa566; }
+    .wrap { padding: 32px 36px 40px; }
+    .kicker { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: #9aa2ae; }
+    h1 { font-size: 25px; margin: 8px 0 0; font-weight: 650; letter-spacing: -.015em; }
+    h2 { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #9aa2ae;
+      margin: 34px 0 14px; font-weight: 600; }
+    .lead { font-size: 13px; line-height: 1.6; color: #b8bec9; max-width: 66ch; margin: 12px 0 0; }
+    .lead b { color: #e6e8ec; font-weight: 600; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    /* ---- anatomia ---- */
+    .anat { position: relative; height: 210px; background: #191c22; border: 1px solid #2c313a;
+      border-radius: 12px; }
+    .cl { position: absolute; display: flex; background: rgba(9,11,15,.9); border-radius: 8px;
+      overflow: hidden; box-shadow: 0 3px 14px rgba(0,0,0,.4); }
+    .cl .sp { width: 5px; background: #f0403f; flex: none; }
+    .cl .bd { padding: 8px 13px 9px; }
+    .cl .hn { color: #ff8a3d; font-weight: 650; font-size: 13px; letter-spacing: .01em; }
+    .cl .hn em { font-style: normal; color: #8a93a0; font-weight: 500; font-size: 11px; margin-left: 7px; }
+    .cl .gg { display: flex; gap: 15px; margin-top: 6px; }
+    .cl .gg span { color: #d8dce2; font-size: 12px; }
+    .cl .gg span b { display: block; color: #7f8894; font-size: 9px; letter-spacing: .08em;
+      font-weight: 500; margin-bottom: 2px; }
+    .anat .big { left: 250px; top: 66px; transform: scale(1.35); transform-origin: left top; }
+    .dot { position: absolute; width: 7px; height: 7px; border-radius: 50%; background: #f0403f; }
+    .anat .dot { left: 168px; top: 150px; }
+    .ll { position: absolute; height: 1.5px; background: #f0403f; transform-origin: left center; }
+    .anat .ll { left: 172px; top: 150px; width: 92px; transform: rotate(-24deg); }
+    .note { position: absolute; font-size: 10.5px; color: #9aa2ae; line-height: 1.4; }
+    .note b { color: #cdd2da; font-weight: 600; }
+    .n1 { left: 24px; top: 30px; width: 150px; }
+    .n2 { left: 24px; top: 132px; width: 150px; }
+    .n3 { left: 470px; top: 30px; width: 150px; text-align: right; }
+    .n4 { left: 470px; top: 150px; width: 160px; text-align: right; }
+    .tick { position: absolute; width: 1px; background: #3a4150; }
+
+    /* ---- resa su fondo ---- */
+    .tiles { display: flex; gap: 18px; }
+    .tile { width: 300px; height: 190px; border-radius: 10px; overflow: hidden; position: relative;
+      border: 1px solid #2c313a; }
+    .tile .cap { position: absolute; left: 8px; bottom: 6px; z-index: 4; font-size: 9.5px;
+      letter-spacing: .1em; text-transform: uppercase; color: rgba(255,255,255,.8); text-shadow: 0 1px 2px #000; }
+    .warm { background: linear-gradient(125deg, #efd94f, #cdae3c 45%, #7f8f3c); }
+    .warm::after { content: ""; position: absolute; inset: 0;
+      background: radial-gradient(90px 70px at 62% 60%, rgba(255,150,40,.6), transparent),
+                  radial-gradient(120px 90px at 24% 26%, rgba(255,90,40,.35), transparent); }
+    .urban { background: repeating-linear-gradient(92deg, #6f6c67 0 13px, #59564f 13px 27px),
+      linear-gradient(#8a8781, #45423d); background-blend-mode: soft-light; }
+    .urban::after { content: ""; position: absolute; left: 60%; top: 20%; width: 34px; height: 66px;
+      background: #b5462f; box-shadow: -140px 20px 0 #2f3540; }
+    .roi { position: absolute; left: 150px; top: 74px; width: 96px; height: 96px;
+      border: 2px solid #f0403f; border-radius: 50%; }
+    .roi::before, .roi::after { content: ""; position: absolute; background: #f0403f; }
+    .roi::before { left: 47px; top: 43px; width: 1px; height: 10px; }
+    .roi::after { left: 43px; top: 47px; width: 10px; height: 1px; }
+    .tll { position: absolute; left: 92px; top: 58px; width: 70px; height: 1.5px; background: #f0403f;
+      transform: rotate(30deg); transform-origin: left center; }
+    .tll::after { content: ""; position: absolute; right: -3px; top: -2px; width: 5px; height: 5px;
+      border-radius: 50%; background: #f0403f; }
+    .tlbl { position: absolute; left: 18px; top: 22px; display: flex; background: rgba(9,11,15,.88);
+      border-radius: 7px; overflow: hidden; font-size: 11px; }
+    .tlbl .sp { width: 4px; background: #f0403f; }
+    .tlbl .bd { padding: 6px 10px 7px; }
+    .tlbl .hn { color: #ff8a3d; font-weight: 650; font-size: 11.5px; }
+    .tlbl .hn em { font-style: normal; color: #8a93a0; font-weight: 500; margin-left: 5px; font-size: 10px; }
+    .tlbl .gg { display: flex; gap: 12px; margin-top: 4px; color: #d3d8df; }
+    .tlbl .gg span b { display: block; color: #7f8894; font-size: 8.5px; letter-spacing: .07em;
+      font-weight: 500; margin-bottom: 1px; }
+
+    /* ---- regola d'oro ---- */
+    .gold { margin-top: 14px; border: 1px solid #3a3320; background: #1e1c14; border-radius: 10px;
+      padding: 16px 18px; display: flex; gap: 14px; align-items: flex-start; }
+    .gold svg { flex: none; margin-top: 1px; }
+    .gold p { margin: 0; font-size: 12.5px; line-height: 1.6; color: #d8d3c2; }
+    .gold p b { color: #ffd9a8; font-weight: 600; }
+
+    /* ---- comportamento ---- */
+    ol.beh { margin: 0; padding-left: 20px; }
+    ol.beh li { font-size: 12.5px; line-height: 1.65; color: #b8bec9; margin-bottom: 8px; max-width: 70ch; }
+    ol.beh li b { color: #e6e8ec; font-weight: 600; }
+    ol.beh code { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: #ffb27a;
+      background: #22262e; padding: 1px 5px; border-radius: 4px; }
+
+    /* ---- stati ---- */
+    .states { display: flex; gap: 16px; }
+    .st { flex: 1; background: #191c22; border: 1px solid #2c313a; border-radius: 10px;
+      padding: 14px; position: relative; min-height: 120px; }
+    .st .lab { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: #9aa2ae; }
+    .st .desc { font-size: 11px; color: #8a929e; line-height: 1.45; margin-top: 6px; }
+    .demo { position: relative; height: 52px; margin-top: 8px; }
+    .mini { position: absolute; display: flex; background: rgba(9,11,15,.9); border-radius: 6px;
+      overflow: hidden; font-size: 10px; }
+    .mini .sp { width: 3px; background: #f0403f; }
+    .mini .bd { padding: 4px 7px 5px; }
+    .mini .hn { color: #ff8a3d; font-weight: 650; }
+    .mini .gg { color: #cfd3da; margin-top: 2px; }
+    .mini.sel { box-shadow: 0 0 0 1.5px #ff8a3d, 0 3px 12px rgba(0,0,0,.5); }
+    .mini.sel .sp { width: 5px; }
+  </style>
+</helmet>
+<div class="wrap">
+  <div class="kicker">Warmish · overlay ROI · proposta</div>
+  <h1>Callout collegato</h1>
+  <p class="lead">Il cartellino <b>vive fuori dalla ROI</b> e le resta legato da una linea di richiamo
+  sottile che punta al centro. Non copre mai la misura sotto, e — regola non negoziabile — <b>due
+  cartellini non si sovrappongono mai</b>: quando lo spazio si stringe, l'etichetta si sposta, si
+  accorcia o si impila, ma la linea di richiamo mantiene sempre chiaro a quale ROI appartiene.</p>
+
+  <h2>Anatomia</h2>
+  <div class="anat">
+    <div class="tick" style="left:249px; top:56px; height:104px;"></div>
+    <div class="cl big">
+      <div class="sp"></div>
+      <div class="bd">
+        <div class="hn">Spot_1 <em>&epsilon; 0.950</em></div>
+        <div class="gg"><span><b>MIN</b>33.98</span><span><b>MED</b>37.26</span><span><b>MAX</b>45.61</span></div>
+      </div>
+    </div>
+    <div class="dot"></div>
+    <div class="ll"></div>
+    <div class="note n1"><b>Spina</b> nel colore della ROI: aggancio visivo immediato anche con molte aree.</div>
+    <div class="note n2"><b>Nome + &epsilon;</b> sulla prima riga; &epsilon; in grigio, sempre presente.</div>
+    <div class="note n3"><b>Mini-griglia</b> a colonne fisse: MIN / MED / MAX si leggono incolonnati tra ROI diverse.</div>
+    <div class="note n4"><b>Linea di richiamo</b> + pallino sul centro esatto della ROI. Unico segno aggiunto sull'immagine.</div>
+  </div>
+
+  <h2>Resa sopra la termografia</h2>
+  <div class="tiles">
+    <div class="tile warm">
+      <div class="roi"></div>
+      <div class="tll"></div>
+      <div class="tlbl"><div class="sp"></div><div class="bd"><div class="hn">Spot_1<em>&epsilon; 0.950</em></div><div class="gg mono"><span><b>MIN</b>33.98</span><span><b>MED</b>37.26</span><span><b>MAX</b>45.61</span></div></div></div>
+      <div class="cap">Fondo caldo</div>
+    </div>
+    <div class="tile urban">
+      <div class="roi"></div>
+      <div class="tll"></div>
+      <div class="tlbl"><div class="sp"></div><div class="bd"><div class="hn">Spot_1<em>&epsilon; 0.950</em></div><div class="gg mono"><span><b>MIN</b>33.98</span><span><b>MED</b>37.26</span><span><b>MAX</b>45.61</span></div></div></div>
+      <div class="cap">Dettaglio urbano</div>
+    </div>
+  </div>
+
+  <h2>Regola: nessuna sovrapposizione</h2>
+  <div class="gold">
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#ffd9a8" stroke-width="1.6"
+      stroke-linecap="round" stroke-linejoin="round"><path d="M10 2.5 3 5.5v4.2c0 4.3 2.9 6.7 7 8 4.1-1.3 7-3.7 7-8V5.5z"/><path d="m7 10 2 2 4-4.5"/></svg>
+    <p>Il layout tratta i cartellini come <b>rettangoli solidi</b> in un risolutore di collisioni:
+    nessun cartellino può toccarne un altro né coprire una ROI o il bordo dell'immagine. Se non
+    esiste posizione valida, il cartellino ripiega su una forma più piccola prima di cedere terreno.
+    L'esempio completo è nell'artboard <b>Collisioni</b>.</p>
+  </div>
+
+  <h2>Comportamento di posizionamento</h2>
+  <ol class="beh">
+    <li><b>Posizione preferita:</b> in alto a sinistra della ROI, appena fuori dal contorno, con un
+    piccolo scarto (<code>gap 6&nbsp;px</code>).</li>
+    <li><b>Se collide</b> (con un altro cartellino, una ROI o il bordo) si prova un anello di
+    candidati attorno alla ROI — 8 direzioni, raggio crescente — e si prende il <b>primo libero</b>.</li>
+    <li><b>Se nessun candidato è libero:</b> il cartellino si riduce a <code>nome + MAX</code>, poi al
+    solo <code>nome</code>; in ultima istanza i cartellini vicini si <b>impilano</b> in una colonna
+    unica con linee di richiamo separate.</li>
+    <li><b>Linea di richiamo</b> sempre dal bordo più vicino del cartellino al <b>centroide</b> della
+    ROI; si accorcia ma non sparisce. Disattivabile globalmente.</li>
+    <li><b>Trascinamento:</b> spostare un cartellino lo rende <b>fissato manualmente</b> — il
+    risolutore lavora attorno a lui e non lo muove più (salvo collisione forzata).</li>
+    <li><b>Ricalcolo</b> solo su pan/zoom conclusi, aggiunta/rimozione ROI o resize: <b>niente
+    riflusso durante il drag</b>.</li>
+  </ol>
+
+  <h2>Stati</h2>
+  <div class="states">
+    <div class="st">
+      <div class="lab">Normale</div>
+      <div class="demo"><div class="mini" style="left:0;top:6px"><div class="sp"></div><div class="bd"><div class="hn">Spot_1</div><div class="gg mono">33.98 · 37.26 · 45.61</div></div></div></div>
+      <div class="desc">Spina 3&nbsp;px, plate all'88% di opacità.</div>
+    </div>
+    <div class="st">
+      <div class="lab">Selezionata</div>
+      <div class="demo"><div class="mini sel" style="left:0;top:6px"><div class="sp"></div><div class="bd"><div class="hn">Spot_1</div><div class="gg mono">33.98 · 37.26 · 45.61</div></div></div></div>
+      <div class="desc">Anello accento, spina 5&nbsp;px, ombra marcata, porta in primo piano.</div>
+    </div>
+    <div class="st">
+      <div class="lab">Compatta</div>
+      <div class="demo"><div class="mini" style="left:0;top:6px"><div class="sp"></div><div class="bd"><div class="hn">Spot_1</div><div class="gg mono">MAX 45.61</div></div></div></div>
+      <div class="desc">Ripiego quando lo spazio libero non basta per la griglia intera.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
