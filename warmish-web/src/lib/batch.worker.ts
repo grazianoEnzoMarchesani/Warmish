@@ -84,7 +84,9 @@ self.onmessage = async (ev: MessageEvent<BatchRequest>) => {
         palette: settings.palette,
         inverted: settings.inverted,
         range: settings.autoRange
-          ? { mode: 'auto' }
+          ? (settings.stretchPct > 0
+              ? { mode: 'stretch', percentile: settings.stretchPct }
+              : { mode: 'auto' })
           : { mode: 'manual', min: settings.manualMin, max: settings.manualMax },
         legend: true,
         decorated_long_edge: DECORATED_LONG_EDGE,

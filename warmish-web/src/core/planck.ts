@@ -105,6 +105,59 @@ export function temperatureRange(t: Float64Array): TemperatureRange {
   return { min, max };
 }
 
+/**
+ * Central-percentile bounds — the display window that keeps the middle `pct` %
+ * of the pixels and clips the tails, so a lone hot/cold pixel (a specular
+ * reflection, a sun glint) can't flatten the contrast of the rest of the scene.
+ * This is the classic linear percentile stretch; the temperature→colour mapping
+ * stays linear, only the endpoints move.
+ *
+ * O(n) via a fine histogram + CDF (no sort), with linear interpolation inside
+ * the straddling bin. Falls back to the full range when the result would be
+ * degenerate (a near-uniform frame) or the inputs make no sense.
+ */
+export function percentileRange(t: Float64Array, pct: number): TemperatureRange {
+  const full = temperatureRange(t);
+  const span = full.max - full.min;
+  if (!(span > 0) || !(pct > 0) || pct >= 100) return full;
+
+  const BINS = 1024;
+  const bins = new Uint32Array(BINS);
+  let n = 0;
+  for (let i = 0; i < t.length; i++) {
+    const v = t[i];
+    if (Number.isNaN(v)) continue;
+    let b = Math.floor(((v - full.min) / span) * BINS);
+    if (b < 0) b = 0; else if (b >= BINS) b = BINS - 1;
+    bins[b]++;
+    n++;
+  }
+  if (n === 0) return full;
+
+  const tail = (n * (100 - pct)) / 200; // pixels to drop off each end
+  let acc = 0;
+  let lo = full.min;
+  for (let b = 0; b < BINS; b++) {
+    if (acc + bins[b] > tail) {
+      lo = full.min + ((b + (bins[b] ? (tail - acc) / bins[b] : 0)) / BINS) * span;
+      break;
+    }
+    acc += bins[b];
+  }
+  acc = 0;
+  let hi = full.max;
+  for (let b = BINS - 1; b >= 0; b--) {
+    if (acc + bins[b] > tail) {
+      hi = full.min + ((b + 1 - (bins[b] ? (tail - acc) / bins[b] : 0)) / BINS) * span;
+      break;
+    }
+    acc += bins[b];
+  }
+
+  if (!(hi - lo > span / 1000)) return full;
+  return { min: lo, max: hi };
+}
+
 function finite(v: number, fallback: number): number {
   return Number.isFinite(v) ? v : fallback;
 }

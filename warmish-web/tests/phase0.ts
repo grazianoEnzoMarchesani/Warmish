@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
 
 import { parseThermalImage } from '../src/core/flir';
-import { computeTemperatures, parametersFromMetadata, temperatureRange } from '../src/core/planck';
+import { computeTemperatures, parametersFromMetadata, percentileRange, temperatureRange } from '../src/core/planck';
 import { colorize } from '../src/core/colormap';
 import { alignmentFromMetadata } from '../src/core/render';
 
@@ -103,6 +103,18 @@ for (const file of images) {
   const range = temperatureRange(temps);
   check('temperature min', Math.abs(range.min - (ref.tempMin - desktopBias)) <= TOL_TEMP, `${range.min} vs ${ref.tempMin - desktopBias}`);
   check('temperature max', Math.abs(range.max - (ref.tempMax - desktopBias)) <= TOL_TEMP, `${range.max} vs ${ref.tempMax - desktopBias}`);
+
+  // Percentile stretch: the central-98% window sits inside the true range, the
+  // 90% window inside the 98% one, and a full 100% window is the range itself.
+  const p98 = percentileRange(temps, 98);
+  const p90 = percentileRange(temps, 90);
+  check('stretch 98% is inside the true range',
+    p98.min >= range.min - 1e-9 && p98.max <= range.max + 1e-9 && p98.max - p98.min < range.max - range.min,
+    `${p98.min}–${p98.max} vs ${range.min}–${range.max}`);
+  check('stretch 90% is tighter than 98%',
+    p90.min >= p98.min - 1e-9 && p90.max <= p98.max + 1e-9);
+  check('stretch 100% is the full range',
+    Math.abs(percentileRange(temps, 100).min - range.min) < 1e-9);
 
   let worst = 0;
   let worstAt = -1;

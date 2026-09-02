@@ -50,6 +50,15 @@ export function canvasToPng(canvas: AnyCanvas): Promise<Blob> {
   });
 }
 
+/** JPEG encoding — for large on-screen previews (the map tour) where a decorated
+ *  PNG would be several megabytes for no visible gain. */
+export function canvasToJpeg(canvas: AnyCanvas, quality = 0.85): Promise<Blob> {
+  if ('convertToBlob' in canvas) return canvas.convertToBlob({ type: 'image/jpeg', quality });
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('JPEG encoding failed'))), 'image/jpeg', quality);
+  });
+}
+
 export function imageDataToCanvas(pixels: Uint8ClampedArray, width: number, height: number): AnyCanvas {
   const canvas = createCanvas(width, height);
   context2d(canvas).putImageData(new ImageData(pixels, width, height), 0, 0);
@@ -171,9 +180,14 @@ export function drawLegend(
 }
 
 /**
- * Horizontal colour bar, min on the left and max on the right, used at the
- * bottom of the exported PNGs. `k` scales the text and padding so it stays
- * legible whatever the output resolution.
+ * Horizontal colour bar used at the bottom of the exported PNGs, stacked as
+ * (optional) temperature histogram on top, the colour bar in the middle, and
+ * the min/mid/max labels underneath — the flat counterpart of the in-canvas
+ * range scale. `min` is on the left, `max` on the right; `k` scales the text
+ * and padding so it stays legible whatever the output resolution.
+ *
+ * `histogram` holds bin counts, coldest first, spanning `[min, max]`; its
+ * orientation never flips with `inverted` (only the gradient does).
  */
 export function drawLegendH(
   ctx: Ctx2D,
@@ -186,11 +200,33 @@ export function drawLegendH(
   w: number,
   h: number,
   k = 1,
+  histogram?: number[],
 ): void {
   const font = Math.round(12 * k);
   const pad = Math.round(10 * k);
-  const barH = Math.max(6, h - font - Math.round(10 * k));
-  const barY = y + font + Math.round(8 * k);
+  const gap = Math.round(6 * k);
+  const histH = histogram && histogram.length ? Math.round(24 * k) : 0;
+  const barH = Math.max(6, h - font - gap - (histH ? histH + gap : 0));
+  const barY = y + (histH ? histH + gap : 0);
+  const textY = barY + barH + gap + font;
+
+  if (histH) {
+    const n = histogram!.length;
+    const peak = Math.max(1, ...histogram!);
+    const base = barY - gap;
+    ctx.beginPath();
+    ctx.moveTo(x, base);
+    for (let i = 0; i < n; i++) {
+      ctx.lineTo(x + ((i + 0.5) / n) * w, base - (histogram![i] / peak) * histH);
+    }
+    ctx.lineTo(x + w, base);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(230,232,236,0.24)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(230,232,236,0.65)';
+    ctx.lineWidth = Math.max(1, k);
+    ctx.stroke();
+  }
 
   for (let i = 0; i < w; i++) {
     const t = i / (w - 1);
@@ -207,10 +243,10 @@ export function drawLegendH(
   ctx.textBaseline = 'alphabetic';
   const mid = (min + max) / 2;
   ctx.textAlign = 'left';
-  ctx.fillText(`${min.toFixed(1)} °C`, x + pad, y + font);
+  ctx.fillText(`${min.toFixed(1)} °C`, x + pad, textY);
   ctx.textAlign = 'center';
-  ctx.fillText(`${mid.toFixed(1)} °C`, x + w / 2, y + font);
+  ctx.fillText(`${mid.toFixed(1)} °C`, x + w / 2, textY);
   ctx.textAlign = 'right';
-  ctx.fillText(`${max.toFixed(1)} °C`, x + w - pad, y + font);
+  ctx.fillText(`${max.toFixed(1)} °C`, x + w - pad, textY);
   ctx.textAlign = 'left';
 }

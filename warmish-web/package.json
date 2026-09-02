@@ -20,7 +20,8 @@
   "type": "module",
   "dependencies": {
     "fflate": "^0.8.3",
-    "leaflet": "^1.9.4"
+    "leaflet": "^1.9.4",
+    "protomaps-leaflet": "^5.1.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.2.0",

@@ -126,7 +126,7 @@ const state = {
     AtmosphericTransmission: 0.95, RelativeHumidity: 55,
     PlanckR1: 1, PlanckR2: 1, PlanckB: 1, PlanckF: 1, PlanckO: 1,
   },
-  objectDistance: 2.5, palette: 'Iron', inverted: true, autoRange: false,
+  objectDistance: 2.5, palette: 'Iron', inverted: true, autoRange: false, stretchPct: 98,
   manualMin: -3.5, manualMax: 88.25, showVisible: true, blend: 'HardLight' as const,
   opacity: 0.42, alignment: { ...DEFAULT_ALIGNMENT, scale: 1.3, offsetX: 7, offsetY: -4 },
   labels: { ...DEFAULT_LABEL_SETTINGS, median: true },
@@ -136,6 +136,7 @@ const state = {
 const round = parseSession(JSON.parse(JSON.stringify(buildSession(state))));
 check('round trip: parameters', round.parameters?.Emissivity === 0.93 && round.parameters?.RelativeHumidity === 55);
 check('round trip: range', round.autoRange === false && round.manualMin === -3.5 && round.manualMax === 88.25);
+check('round trip: stretch percentile', round.stretchPct === 98);
 check('round trip: overlay', round.blend === 'HardLight' && round.opacity === 0.42 && round.alignment?.offsetY === -4);
 check('round trip: labels', round.labels?.median === true);
 check('round trip: rois', JSON.stringify(round.rois?.map((r) => [r.type, r.name, r.emissivity]))

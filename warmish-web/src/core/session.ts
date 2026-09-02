@@ -21,6 +21,8 @@ export interface SessionState {
   palette: string;
   inverted: boolean;
   autoRange: boolean;
+  /** Auto-range stretch: 0 = true min/max, >0 = central percentile kept. Web-only. */
+  stretchPct: number;
   manualMin: number;
   manualMax: number;
   showVisible: boolean;
@@ -66,6 +68,9 @@ export function buildSession(s: SessionState): Record<string, unknown> {
       mode: s.autoRange ? 'autorange' : 'manual',
       manual_min: s.manualMin,
       manual_max: s.manualMax,
+      // Web-only extension; the desktop ignores the unknown key and falls back
+      // to a plain autorange.
+      stretch_pct: s.stretchPct || undefined,
     },
     overlay_settings: {
       scale: s.alignment.scale,
@@ -124,6 +129,7 @@ export function parseSession(json: unknown): SessionPatch {
     if (typeof r.mode === 'string') patch.autoRange = r.mode !== 'manual';
     if (isNum(r.manual_min)) patch.manualMin = r.manual_min;
     if (isNum(r.manual_max)) patch.manualMax = r.manual_max;
+    if (isNum(r.stretch_pct)) patch.stretchPct = Math.min(99.9, Math.max(0, r.stretch_pct));
   }
 
   if (isObject(d.overlay_settings)) {

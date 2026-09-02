@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ExifEntry } from '../core/exif';
   import type { FlirMetadata } from '../core/flir';
+  import { dialog } from './dialog';
 
   let { exif, metadata, fileName, onclose }: {
     exif: ExifEntry[];
@@ -28,7 +29,7 @@
 
 <div class="backdrop">
   <button type="button" class="scrim" aria-label="Chiudi" onclick={onclose}></button>
-  <div class="modal" role="dialog" aria-modal="true" aria-label="Dati EXIF">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Dati EXIF" tabindex="-1" use:dialog>
     <header>
       <h2>Dati EXIF<span>{fileName}</span></h2>
       <button class="x" onclick={onclose} aria-label="Chiudi">×</button>

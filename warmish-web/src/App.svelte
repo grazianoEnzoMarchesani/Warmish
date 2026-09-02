@@ -1,13 +1,19 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { untrack, tick } from 'svelte';
   import Viewer from './lib/Viewer.svelte';
   import ExifModal from './lib/ExifModal.svelte';
+  import HelpModal from './lib/HelpModal.svelte';
+  import ToolRail from './lib/ToolRail.svelte';
+  import RangeScale from './lib/RangeScale.svelte';
+  import Toasts from './lib/Toasts.svelte';
+  import { toast, progressToast } from './lib/toast.svelte';
+  import { dialog } from './lib/dialog';
   import MapView, { type MapPoint } from './lib/MapView.svelte';
   import type { Tool } from './lib/tools';
   import { parseThermalImage, type ThermalFile } from './core/flir';
-  import { parseExif, parseGps, type ExifEntry, type GpsFix } from './core/exif';
-  import { computeTemperatures, parametersFromMetadata, temperatureRange, type ThermalParameters } from './core/planck';
-  import { PALETTE_NAMES, DEFAULT_PALETTE, colorize } from './core/colormap';
+  import { parseCapture, parseExif, parseGps, type ExifEntry, type GpsFix } from './core/exif';
+  import { computeTemperatures, parametersFromMetadata, percentileRange, temperatureRange, type ThermalParameters } from './core/planck';
+  import { PALETTE_NAMES, DEFAULT_PALETTE, colorize, getLut } from './core/colormap';
   import {
     BLEND_NAMES, composite, imageDataToCanvas, alignmentFromMetadata,
     DEFAULT_ALIGNMENT, type BlendMode, type OverlayAlignment,
@@ -17,11 +23,11 @@
     type VisibleFilter, type FilterName,
   } from './core/imageFilter';
   import {
-    nextRoiId, roiColor, roiStatistics, DEFAULT_ROI_EMISSIVITY, type Roi, type RoiStats,
+    roiColor, roiStatistics, type Roi, type RoiStats,
   } from './core/roi';
   import { DEFAULT_LABEL_SETTINGS, type RoiLabelSettings } from './core/roiRender';
   import { buildSession, parseSession, type SessionPatch } from './core/session';
-  import { type RenderSettings, type UserParameters } from './core/pipeline';
+  import { renderHeroImage, type RenderSettings, type UserParameters } from './core/pipeline';
   import type { BatchMessage, BatchRequest } from './lib/batch.worker';
 
   const APP_VERSION = '1.0.0';
@@ -33,8 +39,28 @@
   let currentFile = $state.raw<File | null>(null);
   let exif = $state<ExifEntry[]>([]);
   let showExif = $state(false);
-  let error = $state('');
-  let notice = $state('');
+  let showHelp = $state(false);
+  // "Apri" dropdown in the top bar.
+  let openMenu = $state(false);
+
+  // Theme: follow the OS ('auto') or pin light/dark. Stamped on <html> for app.css.
+  type Theme = 'auto' | 'light' | 'dark';
+  let theme = $state<Theme>(
+    (() => { try { return (localStorage.getItem('warmish.theme') as Theme) || 'auto'; } catch { return 'auto'; } })(),
+  );
+  $effect(() => {
+    const el = document.documentElement;
+    if (theme === 'auto') el.removeAttribute('data-theme');
+    else el.setAttribute('data-theme', theme);
+    try { localStorage.setItem('warmish.theme', theme); } catch { /* private mode */ }
+  });
+  const THEME_LABEL: Record<Theme, string> = { auto: 'automatico', light: 'chiaro', dark: 'scuro' };
+  const THEME_GLYPH: Record<Theme, string> = { auto: '◐', light: '☀', dark: '☾' };
+  const cycleTheme = () => {
+    theme = theme === 'auto' ? 'light' : theme === 'light' ? 'dark' : 'auto';
+  };
+  // Current zoom %, reported by the viewer, shown in the status bar.
+  let zoomPct = $state(100);
   let busy = $state(false);
 
   let params = $state<ThermalParameters | null>(null);
@@ -46,6 +72,42 @@
   let showVisible = $state(false);
   let showLegend = $state(true);
   let autoRange = $state(true);
+  // Auto-range stretch: 0 keeps the true min/max at the ends of the scale; >0
+  // clips to that central percentile of the pixels, so a lone hot/cold pixel
+  // can't flatten the contrast. Only meaningful while `autoRange` is on.
+  let stretchPct = $state(0);
+  // "Common folder scale": an override layer (does not touch autoRange/stretch/
+  // manual) that pins the window to the min-of-mins / max-of-maxes across every
+  // image in the open folder, so frames can be compared at a glance. The bounds
+  // are scanned lazily — see `scanFolderRange`.
+  let folderRange = $state(false);
+  let folderBounds = $state<{ min: number; max: number } | null>(null);
+  let folderRangeScanning = $state(false);
+
+  function cycleRange() {
+    if (!autoRange) { autoRange = true; folderRange = false; stretchPct = 0; return; }
+    if (folderRange) { folderRange = false; stretchPct = 0; return; }
+    const steps: (number | 'folder')[] = folder.length ? [0, 98, 90, 'folder'] : [0, 98, 90];
+    const next = steps[(steps.indexOf(stretchPct) + 1) % steps.length];
+    if (next === 'folder') { folderRange = true; stretchPct = 0; scanFolderRange(); }
+    else stretchPct = next;
+  }
+  function setStretch(pct: number) {
+    autoRange = true;
+    folderRange = false;
+    stretchPct = Math.min(99.8, Math.max(0, pct));
+  }
+  function enableFolderRange() {
+    autoRange = true;
+    stretchPct = 0;
+    folderRange = true;
+    scanFolderRange();
+  }
+  function resetRange() {
+    autoRange = true;
+    folderRange = false;
+    stretchPct = 0;
+  }
   let manualMin = $state(0);
   let manualMax = $state(100);
   let alignment = $state<OverlayAlignment>({ ...DEFAULT_ALIGNMENT });
@@ -59,15 +121,47 @@
 
   // Sidebar is split into task-focused tabs so only one group of controls is on
   // screen at a time; the choice is remembered like the filmstrip.
-  type TabId = 'immagine' | 'parametri' | 'aree' | 'esporta';
+  type TabId = 'immagine' | 'aree' | 'esporta';
+  const TAB_LABELS: [TabId, string][] = [
+    ['immagine', 'Immagine'], ['aree', 'Aree'], ['esporta', 'Esporta'],
+  ];
+  const TABS: TabId[] = TAB_LABELS.map(([id]) => id);
+
+  async function onTabKey(ev: KeyboardEvent) {
+    const i = TABS.indexOf(activeTab);
+    let j = i;
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') j = (i + 1) % TABS.length;
+    else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') j = (i - 1 + TABS.length) % TABS.length;
+    else if (ev.key === 'Home') j = 0;
+    else if (ev.key === 'End') j = TABS.length - 1;
+    else return;
+    ev.preventDefault();
+    activeTab = TABS[j];
+    await tick();
+    (ev.currentTarget as HTMLElement).parentElement
+      ?.querySelector<HTMLElement>('[role="tab"][tabindex="0"]')?.focus();
+  }
   let activeTab = $state<TabId>(
     (() => {
-      try { return (localStorage.getItem('warmish.tab') as TabId) || 'immagine'; }
-      catch { return 'immagine'; }
+      try {
+        const t = localStorage.getItem('warmish.tab') as TabId;
+        return TABS.includes(t) ? t : 'immagine';
+      } catch { return 'immagine'; }
     })(),
   );
   $effect(() => {
     try { localStorage.setItem('warmish.tab', activeTab); } catch { /* private mode */ }
+  });
+
+  // The bulk-edit slide-over (folder view). Selection itself stays on the strip.
+  let bulkOpen = $state(false);
+
+  // "Avanzate" disclosure in the Immagine tab — calibration, filter, alignment.
+  let advOpen = $state(
+    (() => { try { return localStorage.getItem('warmish.adv') === '1'; } catch { return false; } })(),
+  );
+  $effect(() => {
+    try { localStorage.setItem('warmish.adv', advOpen ? '1' : '0'); } catch { /* private mode */ }
   });
 
   let visibleBitmap = $state<ImageBitmap | null>(null);
@@ -81,15 +175,26 @@
   let gps = $state<GpsFix | null>(null);
   let viewMode = $state<'thermal' | 'map'>('thermal');
   let folderGps = $state(new Map<string, GpsFix>());
+  /** Capture time per folder path, ms epoch — orders the map tour. */
+  let folderTime = $state(new Map<string, number>());
   let folderGpsScanned = $state(false);
   let folderGpsScanning = $state(false);
   let currentThumb = $state<string | null>(null);
+
+  /** "YYYY-MM-DD HH:MM:SS" (naive local) → ms epoch, or null. */
+  function captureMs(bytes: Uint8Array): number | null {
+    const dt = parseCapture(bytes).datetime;
+    if (!dt) return null;
+    const ms = Date.parse(dt.replace(' ', 'T'));
+    return Number.isNaN(ms) ? null : ms;
+  }
 
   async function scanFolderGps() {
     if (!folder.length || folderGpsScanned || folderGpsScanning) return;
     folderGpsScanning = true;
     try {
       const next = new Map<string, GpsFix>();
+      const times = new Map<string, number>();
       for (const e of folder) {
         try {
           // The standard Exif APP1 sits at the head of the file, before the bulky
@@ -97,12 +202,59 @@
           const head = new Uint8Array(await e.file.slice(0, 262144).arrayBuffer());
           const fix = parseGps(head);
           if (fix) next.set(e.path, fix);
+          const t = captureMs(head);
+          if (t !== null) times.set(e.path, t);
         } catch { /* unreadable file — skip */ }
       }
       folderGps = next;
+      folderTime = times;
       folderGpsScanned = true;
     } finally {
       folderGpsScanning = false;
+    }
+  }
+
+  /**
+   * Scan every folder image for its own data range and keep the global envelope
+   * (min of mins, max of maxes) in `folderBounds`. Heavy — a full radiometric
+   * decode per file — so it runs once, lazily, when the "common folder scale"
+   * mode is turned on, and is re-run only when a bulk edit changes calibration.
+   * Each image is measured against its own embedded parameters plus whatever its
+   * saved session overrides, matching how the filmstrip renders it.
+   */
+  async function scanFolderRange() {
+    if (!folder.length || folderBounds || folderRangeScanning) return;
+    folderRangeScanning = true;
+    const prog = progressToast('Scansione della cartella per la scala comune…');
+    try {
+      let lo = Infinity;
+      let hi = -Infinity;
+      let done = 0;
+      for (const e of folder) {
+        try {
+          const parsed = await parseCached(e);
+          const p = parametersFromMetadata(parsed.metadata);
+          const saved = folderState.get(e.path);
+          if (saved) {
+            const patch = parseSession(saved);
+            if (patch.parameters) Object.assign(p, patch.parameters);
+          }
+          const r = temperatureRange(computeTemperatures(parsed.raw, p));
+          if (r.min < lo) lo = r.min;
+          if (r.max > hi) hi = r.max;
+        } catch { /* unreadable frame — skip it */ }
+        prog.update(++done, folder.length, `${done}/${folder.length}`);
+      }
+      if (lo < hi) {
+        folderBounds = { min: lo, max: hi };
+        prog.finish('success', `Scala comune alla cartella: ${lo.toFixed(1)}–${hi.toFixed(1)} °C`);
+        if (folderRange) regenThumbs(folder.map((e) => e.path));
+      } else {
+        folderRange = false;
+        prog.finish('error', 'Impossibile calcolare la scala comune alla cartella');
+      }
+    } finally {
+      folderRangeScanning = false;
     }
   }
 
@@ -148,6 +300,14 @@
     }
   }
 
+  /** Capture time of the single open image, ms epoch — from its parsed EXIF. */
+  const loneTime = $derived.by<number | null>(() => {
+    const raw = exif.find((e) => e.tag === 'DateTimeOriginal' || e.tag === 'DateTime')?.value;
+    if (!raw) return null;
+    const ms = Date.parse(raw.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3').replace(' ', 'T'));
+    return Number.isNaN(ms) ? null : ms;
+  });
+
   /** Marker set for the map: the whole folder when one is open, else this image. */
   const mapPoints = $derived.by<MapPoint[]>(() => {
     const pts: MapPoint[] = [];
@@ -162,6 +322,7 @@
           direction: fix.direction, directionRef: fix.directionRef,
           thumb: e.path === activePath ? currentThumb ?? e.thumb : e.thumb,
           active: e.path === activePath,
+          time: e.path === activePath && loneTime !== null ? loneTime : folderTime.get(e.path) ?? null,
         });
       }
     } else if (gps && fileName) {
@@ -169,7 +330,7 @@
         path: fileName, name: fileName,
         lat: gps.lat, lon: gps.lon, altitude: gps.altitude,
         direction: gps.direction, directionRef: gps.directionRef,
-        thumb: currentThumb, active: true,
+        thumb: currentThumb, active: true, time: loneTime,
       });
     }
     return pts;
@@ -188,7 +349,50 @@
 
   const temperatures = $derived(file && params ? computeTemperatures(file.raw, params) : null);
   const dataRange = $derived(temperatures ? temperatureRange(temperatures) : { min: 0, max: 0 });
-  const range = $derived(autoRange ? dataRange : { min: manualMin, max: manualMax });
+  /** Auto window: the full data range, or its central-percentile stretch. */
+  const autoBounds = $derived(
+    temperatures && stretchPct > 0 ? percentileRange(temperatures, stretchPct) : dataRange,
+  );
+  /** True while the common folder scale is chosen and its bounds are known. */
+  const folderScaleActive = $derived(autoRange && folderRange && folderBounds !== null);
+  const range = $derived.by(() => {
+    if (!autoRange) return { min: manualMin, max: manualMax };
+    if (folderScaleActive) return folderBounds!;
+    return autoBounds;
+  });
+
+  /**
+   * Domain of the range scale. Normally this image's own min/max; under the
+   * common folder scale it widens to also contain the folder envelope, so the
+   * handles stay on the track and you can see where this frame sits within it.
+   */
+  const scaleDomain = $derived.by(() => {
+    if (folderScaleActive) {
+      return {
+        min: Math.min(dataRange.min, folderBounds!.min),
+        max: Math.max(dataRange.max, folderBounds!.max),
+      };
+    }
+    return dataRange;
+  });
+
+  /** Temperature distribution over the scale domain — behind the range scale. */
+  const HIST_BINS = 48;
+  const histogram = $derived.by(() => {
+    const t = temperatures;
+    if (!t) return [];
+    const lo = scaleDomain.min;
+    const span = scaleDomain.max - scaleDomain.min || 1;
+    const bins = new Array<number>(HIST_BINS).fill(0);
+    for (let i = 0; i < t.length; i++) {
+      const v = t[i];
+      if (Number.isNaN(v)) continue;
+      let b = Math.floor(((v - lo) / span) * HIST_BINS);
+      if (b < 0) b = 0; else if (b >= HIST_BINS) b = HIST_BINS - 1;
+      bins[b]++;
+    }
+    return bins;
+  });
 
   const thermalCanvas = $derived.by(() => {
     if (!file || !temperatures) return null;
@@ -243,8 +447,6 @@
 
   async function load(f: File) {
     busy = true;
-    error = '';
-    notice = '';
     try {
       const bytes = new Uint8Array(await f.arrayBuffer());
       const parsed = parseThermalImage(bytes);
@@ -274,19 +476,21 @@
       params = null;
       exif = [];
       gps = null;
-      error = e instanceof Error ? e.message : String(e);
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       busy = false;
     }
   }
 
-  /** Applies a sidecar on top of the currently open image. */
-  function applySession(patch: SessionPatch, source: string) {
+  /** Applies a sidecar on top of the currently open image. `announce` is off for
+   *  the silent restore that happens on every folder-navigation step. */
+  function applySession(patch: SessionPatch, source: string, announce = true) {
     if (params && patch.parameters) Object.assign(params, patch.parameters);
     if (patch.objectDistance !== undefined) objectDistance = patch.objectDistance;
     if (patch.palette !== undefined) palette = patch.palette;
     if (patch.inverted !== undefined) inverted = patch.inverted;
     if (patch.autoRange !== undefined) autoRange = patch.autoRange;
+    if (patch.stretchPct !== undefined) stretchPct = patch.stretchPct;
     if (patch.manualMin !== undefined) manualMin = patch.manualMin;
     if (patch.manualMax !== undefined) manualMax = patch.manualMax;
     if (patch.blend !== undefined) blend = patch.blend;
@@ -301,14 +505,14 @@
       // The overlay is only worth showing if the session actually configured one.
       if (visibleBitmap && (patch.alignment || patch.blend)) showVisible = true;
     }
-    notice = `Sessione caricata da ${source}`;
+    if (announce) toast.success(`Sessione caricata da ${source}`);
   }
 
   async function loadSession(f: File) {
     try {
       applySession(parseSession(JSON.parse(await f.text())), f.name);
     } catch (e) {
-      error = `Sessione non valida: ${e instanceof Error ? e.message : String(e)}`;
+      toast.error(`Sessione non valida: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -334,7 +538,7 @@
           const active = applyWorkspace(obj.workspace) ?? activePath;
           activePath = null;
           if (active) await openFromFolder(active);
-          notice = `Sessione cartella caricata (${Object.keys(obj.files).length} immagini)`;
+          toast.success(`Sessione cartella caricata (${Object.keys(obj.files).length} immagini)`);
           return;
         }
       } catch { /* fall through to the normal error */ }
@@ -347,7 +551,7 @@
 
     if (image) await load(image);
     if (session && file) await loadSession(session);
-    else if (session && !image) error = 'Apri prima l’immagine, poi la sessione .json';
+    else if (session && !image) toast.error('Apri prima l’immagine, poi la sessione .json');
   }
 
   function onPick(ev: Event) {
@@ -375,14 +579,6 @@
     selectedId = rois[rois.length - 1].id;
   }
 
-  function addSpotAtCentre() {
-    if (!file) return;
-    addRoi({
-      id: nextRoiId(), type: 'SpotROI', name: '', emissivity: DEFAULT_ROI_EMISSIVITY,
-      color: roiColor(rois.length), x: file.width / 2, y: file.height / 2, radius: 10,
-    });
-  }
-
   function deleteRoi(id: string) {
     rois = rois.filter((r) => r.id !== id);
     if (selectedId === id) selectedId = null;
@@ -402,7 +598,7 @@
   function snapshotSession(): Record<string, unknown> | null {
     if (!params) return null;
     return buildSession({
-      parameters: params, objectDistance, palette, inverted, autoRange, manualMin, manualMax,
+      parameters: params, objectDistance, palette, inverted, autoRange, stretchPct, manualMin, manualMax,
       showVisible, blend, opacity, alignment, visibleFilter, labels, rois,
     });
   }
@@ -440,6 +636,7 @@
         selection: [...selection],
         include_originals: includeOriginals,
         area_mode: areaMode,
+        folder_range: folderRange,
       },
     };
     const date = new Date().toISOString().slice(0, 10);
@@ -473,15 +670,28 @@
     if (w.area_mode === 'none' || w.area_mode === 'appearance' || w.area_mode === 'replace') {
       areaMode = w.area_mode;
     }
+    if (w.folder_range === true) { folderRange = true; folderBounds = null; }
     const active = w.active != null ? resolve(w.active) : undefined;
     if (active) page = Math.max(0, Math.floor(folder.findIndex((e) => e.path === active) / PAGE));
     return active ?? null;
   }
 
+  /**
+   * The range fields for an export. The common folder scale is a live override
+   * layer, so it is baked here into a fixed manual window — the worker renders
+   * one image at a time and cannot see the rest of the folder.
+   */
+  function rangeSettings(): Pick<RenderSettings, 'autoRange' | 'stretchPct' | 'manualMin' | 'manualMax'> {
+    if (folderScaleActive) {
+      return { autoRange: false, stretchPct: 0, manualMin: folderBounds!.min, manualMax: folderBounds!.max };
+    }
+    return { autoRange, stretchPct, manualMin, manualMax };
+  }
+
   /** Render settings for the open image, with the on-screen parameters baked in. */
   function currentSettings(): RenderSettings {
     return {
-      palette, inverted, autoRange, manualMin, manualMax, showVisible, blend, opacity,
+      palette, inverted, ...rangeSettings(), showVisible, blend, opacity,
       alignment: { ...alignment },
       visibleFilter: { ...visibleFilter },
       labels: { ...labels },
@@ -499,8 +709,9 @@
   }
 
   /** The open image as a one-item export zip — same structure as the batch. */
-  function exportZip() {
+  async function exportZip() {
     if (!currentFile || batchProgress) return;
+    if (folderRange && !folderBounds) await scanFolderRange();
     dispatchExport([currentFile], currentSettings(), undefined, includeOriginals);
   }
 
@@ -615,17 +826,19 @@
 
     const img = (k: number) => (k === 1 ? 'immagine' : 'immagini');
     if (areaMode === 'replace') {
-      notice = `Impostazioni applicate a ${n} ${img(n)} (aree sostituite)`;
+      toast.success(`Impostazioni applicate a ${n} ${img(n)} (aree sostituite)`);
     } else if (areaMode === 'appearance') {
       let msg = `Impostazioni applicate a ${n} ${img(n)}. Aspetto allineato per ${styledAreas} `
         + `${styledAreas === 1 ? 'area' : 'aree'} in ${styledImgs} ${img(styledImgs)}`;
       if (noMatch) msg += `; ${noMatch} ${img(noMatch)} senza aree con lo stesso nome`;
       if (ambiguous.length) msg += `. Nomi non univoci sulla foto corrente, saltati: ${ambiguous.join(', ')}`;
-      notice = msg;
+      toast.success(msg);
     } else {
-      notice = `Impostazioni applicate a ${n} ${img(n)}`;
+      toast.success(`Impostazioni applicate a ${n} ${img(n)}`);
     }
     regenThumbs(selection);
+    // A bulk calibration change can shift the folder envelope — re-measure it.
+    if (folderRange) { folderBounds = null; scanFolderRange(); }
   }
 
   async function ingestFolder(list: FileList | File[]) {
@@ -672,7 +885,10 @@
     folder = entries;
     folderState = state;
     folderGps = new Map();
+    folderTime = new Map();
     folderGpsScanned = false;
+    folderBounds = null;
+    folderRange = false;
     selection = new Set();
     activePath = null;
     page = 0;
@@ -681,10 +897,15 @@
     if (entries.length) {
       const wsActive = applyWorkspace(workspace);
       await openFromFolder(wsActive ?? entries[0].path);
+      // The workspace block may have re-armed the common folder scale.
+      if (folderRange) scanFolderRange();
+      // Scan GPS up front so the "Mappa" badge shows the real count before the
+      // map is ever opened — not just the single open image.
+      scanFolderGps();
       // Tiles for images that came in with a saved session need to reflect it;
       // the rest keep their raw preview until the user opens or bulk-edits them.
       regenThumbs(entries.filter((e) => state.has(e.path)).map((e) => e.path));
-    } else error = 'La cartella non contiene immagini .jpg';
+    } else toast.error('La cartella non contiene immagini .jpg');
   }
 
   async function openFromFolder(path: string) {
@@ -699,7 +920,7 @@
     if (!file) { activePath = null; return; }
     activePath = path;
     const saved = folderState.get(path);
-    if (saved) applySession(parseSession(saved), 'lavoro sulla cartella');
+    if (saved) applySession(parseSession(saved), 'lavoro sulla cartella', false);
   }
 
   // Strip thumbnails start as the raw file previews, so on their own they never
@@ -744,9 +965,11 @@
       const p = parametersFromMetadata(parsed.metadata);
       if (patch?.parameters) Object.assign(p, patch.parameters);
       const temps = computeTemperatures(parsed.raw, p);
-      const r = patch && patch.autoRange === false
-        ? { min: patch.manualMin ?? 0, max: patch.manualMax ?? 100 }
-        : temperatureRange(temps);
+      const r = folderScaleActive
+        ? folderBounds!
+        : patch && patch.autoRange === false
+          ? { min: patch.manualMin ?? 0, max: patch.manualMax ?? 100 }
+          : (patch?.stretchPct ? percentileRange(temps, patch.stretchPct) : temperatureRange(temps));
       const px = colorize(temps, {
         palette: patch?.palette ?? DEFAULT_PALETTE,
         inverted: patch?.inverted ?? false,
@@ -807,6 +1030,35 @@
     }
   }
 
+  /** A large processed frame for the map tour — the same pixels an export of
+   *  this image would produce (palette, range, overlay, filter, areas). Rendered
+   *  on demand as the tour nears a stop; the caller owns the returned blob URL. */
+  async function renderTourImage(path: string): Promise<string | null> {
+    try {
+      let bytes: Uint8Array;
+      let settings: RenderSettings;
+      if (folder.length) {
+        const i = folder.findIndex((e) => e.path === path);
+        if (i < 0) return null;
+        bytes = new Uint8Array(await folder[i].file.arrayBuffer());
+        if (path === activePath) {
+          settings = currentSettings();
+        } else {
+          const ov = folderOverrides()[i];
+          settings = ov ? { ...renderSettings(), ...ov } : renderSettings();
+        }
+      } else {
+        if (!currentFile) return null;
+        bytes = new Uint8Array(await currentFile.arrayBuffer());
+        settings = currentSettings();
+      }
+      const blob = await renderHeroImage(bytes, settings);
+      return URL.createObjectURL(blob);
+    } catch {
+      return null;
+    }
+  }
+
   // The open image's tile, kept in sync with the viewer. Reads the same render
   // inputs, then debounces: a slider drag runs this once, ~300 ms after release.
   let activeThumbTimer: ReturnType<typeof setTimeout> | undefined;
@@ -837,11 +1089,18 @@
   });
 
   function onWindowKey(ev: KeyboardEvent) {
+    if (ev.key === 'Escape' && bulkOpen) { bulkOpen = false; return; }
     const tag = (ev.target as HTMLElement)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     if ((ev.key === 'm' || ev.key === 'M') && file) {
       setViewMode(viewMode === 'map' ? 'thermal' : 'map');
       return;
+    }
+    // Area tools, when the thermal canvas is on screen.
+    if (file && viewMode === 'thermal' && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+      const k = ev.key.toLowerCase();
+      const pick: Record<string, Tool> = { v: 'pan', r: 'rect', s: 'spot', p: 'polygon' };
+      if (pick[k]) { tool = pick[k]; return; }
     }
     if (!folder.length) return;
     if (ev.key === 'ArrowRight') navFolder(1);
@@ -855,13 +1114,20 @@
 
   /** Per-image render overrides for the folder batch, parallel to `folder`. */
   function folderOverrides(): (Partial<RenderSettings> | null)[] {
+    // Under the common folder scale the range is pinned for every image by the
+    // base settings, so a per-image saved range must not override it.
+    const pinRange = folderScaleActive;
     return folder.map((e) => {
       const saved = folderState.get(e.path);
       if (!saved) return null;
       const p = parseSession(saved);
       return defined({
-        palette: p.palette, inverted: p.inverted, autoRange: p.autoRange,
-        manualMin: p.manualMin, manualMax: p.manualMax, blend: p.blend, opacity: p.opacity,
+        palette: p.palette, inverted: p.inverted,
+        autoRange: pinRange ? undefined : p.autoRange,
+        stretchPct: pinRange ? undefined : p.stretchPct,
+        manualMin: pinRange ? undefined : p.manualMin,
+        manualMax: pinRange ? undefined : p.manualMax,
+        blend: p.blend, opacity: p.opacity,
         alignment: p.alignment, visibleFilter: p.visibleFilter, labels: p.labels,
         rois: p.rois ? p.rois.map((r) => $state.snapshot(r) as Roi) : undefined,
         parameters: p.parameters ? (p.parameters as UserParameters) : undefined,
@@ -874,7 +1140,6 @@
   // these; the work itself runs in the one worker in `dispatchExport`.
   let includeOriginals = $state(true);
   let batchProgress = $state<{ done: number; total: number; name: string } | null>(null);
-  let batchResult = $state('');
 
   /**
    * The base settings for a folder export: everything the folder path pins the
@@ -885,7 +1150,7 @@
    */
   function renderSettings(): RenderSettings {
     return {
-      palette, inverted, autoRange, manualMin, manualMax, showVisible,
+      palette, inverted, ...rangeSettings(), showVisible,
       blend, opacity,
       alignment: { ...alignment },
       visibleFilter: { ...visibleFilter },
@@ -908,31 +1173,35 @@
     withOriginals: boolean,
   ) {
     if (!files.length || batchProgress) return;
-    batchResult = '';
     batchProgress = { done: 0, total: files.length, name: '' };
     const exportDate = new Date().toISOString().slice(0, 10);
     const zipName = `warmish_export_${exportDate}.zip`;
+    const one = files.length === 1;
+    const prog = progressToast(one ? 'Elaborazione dell’immagine…' : `Elaborazione di ${files.length} immagini…`);
 
     const worker = new Worker(new URL('./lib/batch.worker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (ev: MessageEvent<BatchMessage>) => {
       const m = ev.data;
       if (m.type === 'progress') {
         batchProgress = { done: m.done, total: m.total, name: m.name };
+        prog.update(m.done, m.total, one ? 'Elaborazione…' : `${m.done}/${m.total} · ${m.name}`);
       } else if (m.type === 'done') {
         download(new Blob([m.zip], { type: 'application/zip' }), zipName);
-        batchResult = m.failures.length
-          ? `${m.processed} immagini elaborate, ${m.failures.length} non riuscite (vedi errori.txt nello zip)`
-          : `${m.processed} immagini elaborate`;
+        if (m.failures.length) {
+          prog.finish('error', `${m.processed} immagini elaborate, ${m.failures.length} non riuscite (vedi errori.txt nello ZIP)`);
+        } else {
+          prog.finish('success', one ? 'Immagine esportata' : `${m.processed} immagini esportate`);
+        }
         batchProgress = null;
         worker.terminate();
       } else {
-        batchResult = `Errore: ${m.message}`;
+        prog.finish('error', `Errore: ${m.message}`);
         batchProgress = null;
         worker.terminate();
       }
     };
     worker.onerror = (e) => {
-      batchResult = `Errore nel worker: ${e.message}`;
+      prog.finish('error', `Errore nel worker: ${e.message}`);
       batchProgress = null;
       worker.terminate();
     };
@@ -944,13 +1213,15 @@
     } satisfies BatchRequest);
   }
 
-  function exportFolderZip() {
+  async function exportFolderZip() {
     // Every image, each carrying its own edited state (or its sidecar); images
     // never touched keep their own calibration and auto-range.
     if (activePath) {
       const s = snapshotSession();
       if (s) remember(activePath, s);
     }
+    // The common folder scale must be resolved to fixed bounds before dispatch.
+    if (folderRange && !folderBounds) await scanFolderRange();
     dispatchExport(
       folder.map((e) => e.file),
       renderSettings(),
@@ -984,123 +1255,89 @@
   };
 </script>
 
-<svelte:window onkeydown={onWindowKey} />
+<svelte:window
+  onkeydown={onWindowKey}
+  onclick={(e) => {
+    if (openMenu && !(e.target as HTMLElement).closest?.('.menu')) openMenu = false;
+  }}
+/>
 
-<div class="layout" class:has-strip={folder.length && filmstripOpen} ondragover={(e) => e.preventDefault()} ondrop={onDrop} role="application">
-  {#if folder.length && filmstripOpen}
-    <nav class="strip">
-      <div class="strip-head">
-        <span>{folder.length} img{#if selectedCount} · {selectedCount} selez.{/if}</span>
-        <button class="linkish" onclick={() => (filmstripOpen = false)} title="Nascondi (F)">‹</button>
-      </div>
-      <div class="strip-sel">
-        <div class="strip-sel-row">
-          <button onclick={selectAll}>Tutte</button>
-          <button onclick={selectNone}>Nessuna</button>
-          <button onclick={invertSelection}>Inverti</button>
-        </div>
-        <button
-          class="wide sel-apply"
-          disabled={!activePath || selectedCount === 0}
-          onclick={applyToSelected}
-          title="Copia palette, intervallo, parametri termici e allineamento dell'immagine corrente sulle immagini selezionate"
-        >
-          Applica impostazioni a {selectedCount} selez.
+<div class="app" ondragover={(e) => e.preventDefault()} ondrop={onDrop} role="application">
+  <header class="topbar">
+    <h1 class="brand">Warmish <span>Web</span></h1>
+
+    <details class="menu" bind:open={openMenu}>
+      <summary>Apri</summary>
+      <div class="menu-pop">
+        <button onclick={() => { openMenu = false; document.getElementById('pick')?.click(); }}>
+          Immagine o immagini…
         </button>
-        <fieldset class="sel-areas" disabled={!rois.length}>
-          <legend>Aree</legend>
-          <label class="sel-check">
-            <input type="radio" name="areaMode" value="none" bind:group={areaMode} />
-            Lascia invariate
-          </label>
-          <label class="sel-check">
-            <input type="radio" name="areaMode" value="appearance" bind:group={areaMode} />
-            Uniforma solo l'aspetto delle aree con lo stesso nome
-          </label>
-          <label class="sel-check">
-            <input type="radio" name="areaMode" value="replace" bind:group={areaMode} />
-            Sostituisci con le aree correnti (posizioni incluse)
-          </label>
-          {#if areaMode === 'appearance'}
-            <p class="strip-hint">
-              Colore ed emissività delle aree con nome identico vengono allineati a quelli
-              correnti. Posizione e forma restano quelle di ogni foto. Le temperature possono
-              cambiare se l'emissività cambia.
-            </p>
-          {/if}
-        </fieldset>
-        {#if thumbJobs.size}
-          <p class="strip-hint">Aggiorno {thumbJobs.size} {thumbJobs.size === 1 ? 'anteprima' : 'anteprime'}…</p>
-        {/if}
+        <button onclick={() => { openMenu = false; document.getElementById('folderpick')?.click(); }}>
+          Cartella di immagini…
+        </button>
+        <hr />
+        <button disabled={!file} onclick={() => { openMenu = false; showExif = true; }}>
+          Dati EXIF…
+        </button>
+        <a href="geotag/index.html" target="_blank" rel="noopener" onclick={() => (openMenu = false)}>
+          Geotag: correggi il GPS…
+        </a>
+        <p class="menu-hint">Puoi anche trascinare i file in questa finestra.</p>
       </div>
-      {#if pageCount > 1}
-        <div class="pager">
-          <button disabled={page === 0} onclick={() => (page -= 1)}>‹</button>
-          <span>{page + 1}/{pageCount}</span>
-          <button disabled={page >= pageCount - 1} onclick={() => (page += 1)}>›</button>
-        </div>
-      {/if}
-      {#each pageEntries as e (e.path)}
-        <div class="thumb-wrap" class:sel={selection.has(e.path)} class:busy={thumbJobs.has(e.path)}>
-          <button
-            class="thumb"
-            class:on={e.path === activePath}
-            onclick={() => openFromFolder(e.path)}
-            title={e.path}
-          >
-            <img src={e.thumb} alt={e.path} loading="lazy" />
-            {#if folderState.has(e.path)}<span class="edited" title="Ha modifiche salvate"></span>{/if}
-            {#if thumbJobs.has(e.path)}<span class="thumb-spin" aria-hidden="true"></span>{/if}
-          </button>
-          <input
-            class="pick"
-            type="checkbox"
-            checked={selection.has(e.path)}
-            onchange={() => toggleSelect(e.path)}
-            title="Seleziona per l'applicazione in blocco"
-          />
-        </div>
-      {/each}
-    </nav>
-  {/if}
+    </details>
 
-  <aside>
-    <h1>Warmish <span>Web</span></h1>
+    {#if fileName}<span class="cur" title={fileName}>{fileName}</span>{/if}
+    {#if folder.length}<span class="cur muted">cartella · {folder.length} img</span>{/if}
 
-    <label for="pick">Immagini FLIR (+ sessione .json)</label>
-    <input id="pick" type="file" multiple accept="image/jpeg,.jpg,.jpeg,.json" onchange={onPick} />
-    <p class="hint">
-      Una immagine, con la sua <code>.json</code> se ce l'hai. Più immagini
-      insieme (anche prese da cartelle diverse, o trascinate qui) si aprono come
-      una cartella: striscia, modifica in blocco, un solo ZIP.
-    </p>
+    <div class="grow"></div>
 
-    <label for="folderpick">Oppure una cartella di immagini</label>
-    <input id="folderpick" type="file" webkitdirectory multiple
-      onchange={(e) => { const l = (e.currentTarget as HTMLInputElement).files; if (l?.length) ingestFolder(l); }} />
-    {#if folder.length}
-      <p class="file">
-        Cartella: {folder.length} immagini
-        {#if !filmstripOpen}· <button class="linkish" onclick={() => (filmstripOpen = true)}>mostra striscia (F)</button>{/if}
-      </p>
+    {#if file}
+      <div class="viewswitch" role="group" aria-label="Modalità di visualizzazione">
+        <button class:on={viewMode === 'thermal'} aria-pressed={viewMode === 'thermal'} onclick={() => setViewMode('thermal')}>Termica</button>
+        <button
+          class:on={viewMode === 'map'}
+          aria-pressed={viewMode === 'map'}
+          onclick={() => setViewMode('map')}
+          title="Posiziona sulla mappa le foto con coordinate GPS (M)"
+        >
+          Mappa{#if mapCount}<span class="badge">{mapCount}</span>{/if}
+        </button>
+      </div>
+      <button onclick={() => (activeTab = 'esporta')}>Esporta</button>
     {/if}
-    {#if fileName}<p class="file">{fileName}</p>{/if}
-    {#if file}<button class="wide" onclick={() => (showExif = true)}>Dati EXIF…</button>{/if}
-    <a class="toollink" href="geotag/index.html" target="_blank" rel="noopener">
-      Geotag → posiziona le foto sulla mappa e correggi il GPS
-    </a>
-    {#if error}<p class="error">{error}</p>{/if}
-    {#if notice}<p class="notice">{notice}</p>{/if}
+    <button
+      class="icon"
+      onclick={cycleTheme}
+      aria-label={`Tema: ${THEME_LABEL[theme]}. Cambia.`}
+      title={`Tema: ${THEME_LABEL[theme]}`}
+    >{THEME_GLYPH[theme]}</button>
+    <button class="icon" onclick={() => (showHelp = true)} aria-label="Aiuto e scorciatoie" title="Aiuto e scorciatoie">?</button>
+  </header>
+
+  <div class="layout">
+  <aside>
+    <!-- Driven by the "Apri" menu in the top bar and by drag-and-drop. -->
+    <input id="pick" class="sr-only" type="file" multiple accept="image/jpeg,.jpg,.jpeg,.json" onchange={onPick} />
+    <input id="folderpick" class="sr-only" type="file" webkitdirectory multiple
+      onchange={(e) => { const l = (e.currentTarget as HTMLInputElement).files; if (l?.length) ingestFolder(l); }} />
 
     {#if file && params}
-      <div class="tabs" role="tablist">
-        <button role="tab" aria-selected={activeTab === 'immagine'} class:active={activeTab === 'immagine'} onclick={() => (activeTab = 'immagine')}>Immagine</button>
-        <button role="tab" aria-selected={activeTab === 'parametri'} class:active={activeTab === 'parametri'} onclick={() => (activeTab = 'parametri')}>Parametri</button>
-        <button role="tab" aria-selected={activeTab === 'aree'} class:active={activeTab === 'aree'} onclick={() => (activeTab = 'aree')}>Aree</button>
-        <button role="tab" aria-selected={activeTab === 'esporta'} class:active={activeTab === 'esporta'} onclick={() => (activeTab = 'esporta')}>Esporta</button>
+      <div class="tabs" role="tablist" aria-label="Pannelli">
+        {#each TAB_LABELS as [id, label] (id)}
+          <button
+            role="tab"
+            id={`tab-${id}`}
+            aria-controls="tabpanel"
+            aria-selected={activeTab === id}
+            tabindex={activeTab === id ? 0 : -1}
+            class:active={activeTab === id}
+            onclick={() => (activeTab = id)}
+            onkeydown={onTabKey}
+          >{label}</button>
+        {/each}
       </div>
 
-      <div class="panel" role="tabpanel">
+      <div class="panel" role="tabpanel" id="tabpanel" aria-labelledby={`tab-${activeTab}`} tabindex="-1">
       {#if activeTab === 'immagine'}
       <section>
         <h2>Palette</h2>
@@ -1114,7 +1351,35 @@
       <section>
         <h2>Intervallo</h2>
         <label class="check"><input type="checkbox" bind:checked={autoRange} /> Automatico</label>
-        {#if !autoRange}
+        {#if autoRange}
+          <label for="stretch">Contrasto</label>
+          <select
+            id="stretch"
+            value={folderRange ? 'folder' : String(stretchPct)}
+            onchange={(e) => {
+              const v = (e.currentTarget as HTMLSelectElement).value;
+              if (v === 'folder') enableFolderRange();
+              else { folderRange = false; stretchPct = Number(v); }
+            }}
+          >
+            <option value="0">Min/Max reali</option>
+            <option value="90">Stretch 90%</option>
+            <option value="98">Stretch 98%</option>
+            {#if !folderRange && stretchPct !== 0 && stretchPct !== 90 && stretchPct !== 98}
+              <option value={String(stretchPct)}>Stretch {+stretchPct.toFixed(1)}%</option>
+            {/if}
+            {#if folder.length}
+              <option value="folder">Comune alla cartella</option>
+            {/if}
+          </select>
+          {#if folderRange}
+            <p class="hint">
+              {#if folderRangeScanning}Scansione della cartella…
+              {:else if folderBounds}Scala fissa {folderBounds.min.toFixed(1)}–{folderBounds.max.toFixed(1)} °C su tutte le {folder.length} immagini.
+              {:else}Scala comune non disponibile.{/if}
+            </p>
+          {/if}
+        {:else}
           <div class="row">
             <div><label for="mn">Min °C</label><input id="mn" type="number" step="0.1" bind:value={manualMin} /></div>
             <div><label for="mx">Max °C</label><input id="mx" type="number" step="0.1" bind:value={manualMax} /></div>
@@ -1125,7 +1390,7 @@
       {#if file.visible}
         <section>
           <h2>Immagine visibile</h2>
-          <label class="check"><input type="checkbox" bind:checked={showVisible} /> Sovrapponi</label>
+          <label class="check"><input type="checkbox" bind:checked={showVisible} /> Sovrapponi la foto reale</label>
           {#if showVisible}
             <label for="bl">Fusione</label>
             <select id="bl" bind:value={blend}>
@@ -1133,50 +1398,9 @@
             </select>
             <label for="op">Opacità termica: {Math.round(opacity * 100)}%</label>
             <input id="op" type="range" min="0" max="1" step="0.01" bind:value={opacity} />
-            <label for="vf">Filtro foto reale</label>
-            <select
-              id="vf"
-              value={visibleFilter.name}
-              onchange={(e) => {
-                const name = (e.currentTarget as HTMLSelectElement).value as FilterName;
-                visibleFilter = { name, strength: filterPreset(name) };
-              }}
-            >
-              {#each FILTERS as f}<option value={f.name}>{f.label}</option>{/each}
-            </select>
-            {#if visibleFilter.name !== 'none'}
-              <label for="vfs">Intensità filtro: {visibleFilter.strength}%</label>
-              <input id="vfs" type="range" min="0" max="100" step="1" bind:value={visibleFilter.strength} />
-            {/if}
-            <label for="al">Scala termica: {alignment.scale.toFixed(2)}×</label>
-            <input id="al" type="range" min="0.1" max="5" step="0.01" bind:value={alignment.scale} />
-            <div class="row">
-              <div><label for="ox">Offset X</label><input id="ox" type="number" step="1" bind:value={alignment.offsetX} /></div>
-              <div><label for="oy">Offset Y</label><input id="oy" type="number" step="1" bind:value={alignment.offsetY} /></div>
-            </div>
-            <button class="wide" onclick={() => (alignment = file ? alignmentFromMetadata(file.metadata) : { ...DEFAULT_ALIGNMENT })}>Reimposta allineamento</button>
           {/if}
         </section>
       {/if}
-
-      <section>
-        <h2>Vista</h2>
-        <button class="wide" onclick={() => viewer?.fit()}>Adatta alla vista</button>
-      </section>
-      {/if}
-
-      {#if activeTab === 'parametri'}
-      <section>
-        <h2>Parametri termici</h2>
-        <label for="em">Emissività: {params.Emissivity.toFixed(2)}</label>
-        <input id="em" type="range" min="0.1" max="1" step="0.01" bind:value={params.Emissivity} />
-        <label for="rt">Temp. riflessa apparente (°C)</label>
-        <input id="rt" type="number" step="0.5" value={shown(params.ReflectedApparentTemperature)} onchange={edit('ReflectedApparentTemperature')} />
-        <label for="at">Temp. atmosferica (°C)</label>
-        <input id="at" type="number" step="0.5" value={shown(params.AtmosphericTemperature)} onchange={edit('AtmosphericTemperature')} />
-        <label for="rh">Umidità relativa (%)</label>
-        <input id="rh" type="number" step="1" value={shown(params.RelativeHumidity, 0)} onchange={edit('RelativeHumidity')} />
-      </section>
 
       {#if stats}
         <section>
@@ -1189,37 +1413,83 @@
           </dl>
         </section>
       {/if}
+
+      <details class="advanced" bind:open={advOpen}>
+        <summary>Avanzate</summary>
+
+        <div class="adv">
+          <h3>Calibrazione</h3>
+          <label for="em">Emissività: {params.Emissivity.toFixed(2)}</label>
+          <input id="em" type="range" min="0.1" max="1" step="0.01" bind:value={params.Emissivity} />
+          <label for="rt">Temp. riflessa apparente (°C)</label>
+          <input id="rt" type="number" step="0.5" value={shown(params.ReflectedApparentTemperature)} onchange={edit('ReflectedApparentTemperature')} />
+          <label for="at">Temp. atmosferica (°C)</label>
+          <input id="at" type="number" step="0.5" value={shown(params.AtmosphericTemperature)} onchange={edit('AtmosphericTemperature')} />
+          <label for="rh">Umidità relativa (%)</label>
+          <input id="rh" type="number" step="1" value={shown(params.RelativeHumidity, 0)} onchange={edit('RelativeHumidity')} />
+        </div>
+
+        {#if file.visible}
+          <div class="adv">
+            <h3>Foto reale</h3>
+            <label for="vf">Filtro</label>
+            <select
+              id="vf"
+              value={visibleFilter.name}
+              onchange={(e) => {
+                const name = (e.currentTarget as HTMLSelectElement).value as FilterName;
+                visibleFilter = { name, strength: filterPreset(name) };
+              }}
+            >
+              {#each FILTERS as f}<option value={f.name}>{f.label}</option>{/each}
+            </select>
+            {#if visibleFilter.name !== 'none'}
+              <label for="vfs">Intensità: {visibleFilter.strength}%</label>
+              <input id="vfs" type="range" min="0" max="100" step="1" bind:value={visibleFilter.strength} />
+            {/if}
+          </div>
+
+          <div class="adv">
+            <h3>Allineamento termico</h3>
+            <label for="al">Scala: {alignment.scale.toFixed(2)}×</label>
+            <input id="al" type="range" min="0.1" max="5" step="0.01" bind:value={alignment.scale} />
+            <div class="row">
+              <div><label for="ox">Offset X</label><input id="ox" type="number" step="1" bind:value={alignment.offsetX} /></div>
+              <div><label for="oy">Offset Y</label><input id="oy" type="number" step="1" bind:value={alignment.offsetY} /></div>
+            </div>
+            <button class="wide" onclick={() => (alignment = file ? alignmentFromMetadata(file.metadata) : { ...DEFAULT_ALIGNMENT })}>Reimposta allineamento</button>
+          </div>
+        {/if}
+      </details>
       {/if}
 
       {#if activeTab === 'aree'}
       <section>
         <h2>Aree di interesse</h2>
-        <div class="tools">
-          <button class:active={tool === 'pan'} onclick={() => (tool = 'pan')} title="Seleziona e sposta">Sposta</button>
-          <button class:active={tool === 'rect'} onclick={() => (tool = 'rect')} title="Disegna un rettangolo">Rett.</button>
-          <button class:active={tool === 'spot'} onclick={() => (tool = 'spot')} title="Disegna un punto">Punto</button>
-          <button class:active={tool === 'polygon'} onclick={() => (tool = 'polygon')} title="Disegna un poligono">Poligono</button>
-        </div>
-        <button class="wide" onclick={addSpotAtCentre}>Punto al centro</button>
+        <p class="hint">
+          Gli strumenti di disegno sono sulla barra a sinistra dell’immagine
+          (o con i tasti V, R, S, P).
+        </p>
 
         {#if rois.length}
           <ul class="rois">
             {#each rois as roi (roi.id)}
               {@const s = roiStats.get(roi.id)}
               <li class:sel={roi.id === selectedId}>
-                <label class="swatch" title="Cambia colore area">
+                <label class="swatch">
                   <span class="dot" style="background:{roi.color}"></span>
                   <input
                     type="color"
+                    aria-label={`Colore di ${roi.name}`}
                     value={colorToHex(roi.color)}
                     oninput={(e) => (roi.color = e.currentTarget.value)}
                   />
                 </label>
-                <button class="pick" onclick={() => (selectedId = roi.id)}>
+                <button class="pick" aria-pressed={roi.id === selectedId} onclick={() => (selectedId = roi.id)}>
                   <span class="nm">{roi.name}</span>
                   <span class="tm">{fmt(s?.mean)} °C</span>
                 </button>
-                <button class="del" onclick={() => deleteRoi(roi.id)} title="Elimina">×</button>
+                <button class="del" onclick={() => deleteRoi(roi.id)} aria-label={`Elimina ${roi.name}`} title="Elimina">×</button>
               </li>
             {/each}
           </ul>
@@ -1278,17 +1548,9 @@
           Includi gli originali nello ZIP
         </label>
         <p class="hint">
-          Lo ZIP contiene la termica pulita, la versione annotata, la visibile e —
-          se attiva — la sovrapposta, più <code>aree.csv</code> e la sessione
-          <code>.json</code>. Con «includi gli originali» aggiunge anche le
-          immagini FLIR di partenza, così il lavoro si riapre altrove. «Salva
-          sessione» da sola è il checkpoint veloce mentre lavori.
+          Termica pulita e annotata, foto reale, <code>aree.csv</code> e sessione.
+          <button class="linkish" onclick={() => (showHelp = true)}>Dettagli</button>
         </p>
-        {#if batchProgress}
-          <progress value={batchProgress.done} max={batchProgress.total}></progress>
-          <p class="hint">{batchProgress.done}/{batchProgress.total} {batchProgress.name}</p>
-        {/if}
-        {#if batchResult}<p class="notice">{batchResult}</p>{/if}
       </section>
 
       {#if folder.length}
@@ -1297,25 +1559,21 @@
           <button class="wide" onclick={exportFolderZip} disabled={!!batchProgress}>
             {batchProgress ? 'Elaborazione…' : 'Esporta cartella (.zip)'}
           </button>
-          <p class="hint">
-            Ogni immagine con la propria calibrazione e le proprie modifiche
-            (o la sua sessione, se presente). Per allineare palette, parametri o
-            aree su più foto usa «Applica a selezionate» nella striscia, poi
-            torna qui. Con molte foto e gli originali inclusi lo ZIP diventa grande:
-            togli «includi gli originali» se non ti servono.
-          </p>
           <button onclick={exportFolderSession} disabled={!!batchProgress}>
             Salva sessione cartella (.json)
           </button>
           <p class="hint">
-            Un solo file leggero con le modifiche di tutte le immagini e il punto
-            in cui eri. Si riapre ri-selezionando la cartella e trascinando qui il
-            <code>.json</code> — nessun raster, checkpoint veloce.
+            Ogni immagine con la propria calibrazione e le proprie modifiche.
+            <button class="linkish" onclick={() => (showHelp = true)}>Dettagli</button>
           </p>
         </section>
       {/if}
       {/if}
       </div>
+    {:else}
+      <p class="hint aside-empty">
+        Apri un’immagine per accedere a palette, parametri, aree ed esportazione.
+      </p>
     {/if}
   </aside>
 
@@ -1323,58 +1581,215 @@
     {#if busy}
       <div class="empty">Elaborazione…</div>
     {:else if file}
-      <div class="viewswitch" role="group" aria-label="Modalità di visualizzazione">
-        <button class:on={viewMode === 'thermal'} aria-pressed={viewMode === 'thermal'} onclick={() => setViewMode('thermal')}>Termica</button>
-        <button
-          class:on={viewMode === 'map'}
-          aria-pressed={viewMode === 'map'}
-          onclick={() => setViewMode('map')}
-          title="Posiziona sulla mappa le foto con coordinate GPS (M)"
-        >
-          Mappa{#if mapCount}<span class="badge">{mapCount}</span>{/if}
-        </button>
-      </div>
-
       <div class="pane" class:hidden={viewMode !== 'thermal'}>
         <Viewer
           bind:this={viewer}
           image={view}
-          {palette}
-          {inverted}
-          min={range.min}
-          max={range.max}
-          {showLegend}
           {rois}
           stats={roiStats}
           {labels}
           {tool}
           {selectedId}
           onprobe={onProbe}
+          onzoom={(p) => (zoomPct = p)}
           onselect={(id) => (selectedId = id)}
           onroicreate={addRoi}
           ondelete={deleteRoi}
           ontoolreset={() => (tool = 'pan')}
         />
       </div>
+      {#if viewMode === 'thermal'}
+        <ToolRail {tool} onpick={(t) => (tool = t)} />
+        {#if showLegend && temperatures}
+          <RangeScale
+            lut={getLut(palette)}
+            {inverted}
+            dataMin={scaleDomain.min}
+            dataMax={scaleDomain.max}
+            min={range.min}
+            max={range.max}
+            {histogram}
+            auto={autoRange}
+            {stretchPct}
+            folderMode={folderScaleActive}
+            folderAvailable={folder.length > 0}
+            scanning={folderRange && folderRangeScanning}
+            onchange={(mn, mx) => { autoRange = false; folderRange = false; manualMin = mn; manualMax = mx; }}
+            onauto={resetRange}
+            oncycle={cycleRange}
+            onstretch={setStretch}
+            onfolder={enableFolderRange}
+          />
+        {/if}
+      {/if}
       {#if viewMode === 'map'}
         <div class="pane">
-          <MapView points={mapPoints} onopen={openFromMap} />
+          <MapView points={mapPoints} onopen={openFromMap} tourImage={renderTourImage} />
         </div>
       {/if}
-      {#if probe && viewMode === 'thermal'}
-        <div class="probe">{probe.x}, {probe.y} → <strong>{fmt(probe.t)} °C</strong></div>
-      {/if}
     {:else}
-      <div class="empty">
-        <p>Trascina qui una foto FLIR radiometrica</p>
-        <small>Tutto viene elaborato nel browser: nessun file lascia il tuo computer.</small>
+      <div class="empty big">
+        <h2>Editor termico FLIR, tutto nel browser</h2>
+        <p>
+          Apri una foto radiometrica FLIR per rimappare la palette, correggere i
+          parametri di calibrazione, misurare aree e temperature ed esportare le
+          immagini pronte. Più foto o una cartella si modificano in blocco e si
+          esportano in un solo ZIP.
+        </p>
+        <div class="empty-actions">
+          <button class="primary" onclick={() => document.getElementById('pick')?.click()}>Apri immagini…</button>
+          <button onclick={() => document.getElementById('folderpick')?.click()}>Apri una cartella…</button>
+        </div>
+        <small>
+          Trascina qui i file. Tutto viene elaborato sul tuo computer: nessun
+          file viene caricato online.
+        </small>
       </div>
     {/if}
   </main>
+  </div>
+
+  {#if folder.length}
+    <nav class="strip" class:collapsed={!filmstripOpen} aria-label="Immagini della cartella">
+      <div class="strip-bar">
+        <button
+          class="toggle"
+          onclick={() => (filmstripOpen = !filmstripOpen)}
+          aria-expanded={filmstripOpen}
+          title={filmstripOpen ? 'Nascondi la striscia (F)' : 'Mostra la striscia (F)'}
+        >{filmstripOpen ? '▾' : '▸'}</button>
+        <span>{folder.length} immagini{#if selectedCount} · {selectedCount} selezionate{/if}</span>
+        {#if thumbJobs.size}
+          <span class="strip-jobs">· aggiorno {thumbJobs.size} {thumbJobs.size === 1 ? 'anteprima' : 'anteprime'}…</span>
+        {/if}
+        <div class="grow"></div>
+        {#if pageCount > 1}
+          <div class="pager">
+            <button disabled={page === 0} onclick={() => (page -= 1)} aria-label="Pagina precedente">‹</button>
+            <span>{page + 1}/{pageCount}</span>
+            <button disabled={page >= pageCount - 1} onclick={() => (page += 1)} aria-label="Pagina successiva">›</button>
+          </div>
+        {/if}
+        <button class="bulk-open" disabled={!activePath} onclick={() => (bulkOpen = true)}>
+          Modifica in blocco{#if selectedCount}&nbsp;({selectedCount}){/if}…
+        </button>
+      </div>
+      {#if filmstripOpen}
+        <div class="strip-scroll">
+          {#each pageEntries as e (e.path)}
+            <div class="thumb-wrap" class:sel={selection.has(e.path)} class:busy={thumbJobs.has(e.path)}>
+              <button
+                class="thumb"
+                class:on={e.path === activePath}
+                onclick={() => openFromFolder(e.path)}
+                title={e.path}
+              >
+                <img src={e.thumb} alt={e.path} loading="lazy" />
+                {#if folderState.has(e.path)}<span class="edited" title="Ha modifiche salvate"></span>{/if}
+                {#if thumbJobs.has(e.path)}<span class="thumb-spin" aria-hidden="true"></span>{/if}
+              </button>
+              <input
+                class="pick"
+                type="checkbox"
+                checked={selection.has(e.path)}
+                onchange={() => toggleSelect(e.path)}
+                aria-label={`Seleziona ${e.path.split('/').pop()}`}
+                title="Seleziona per la modifica in blocco"
+              />
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </nav>
+  {/if}
+
+  {#if file}
+    <footer class="statusbar">
+      <span class="z">{zoomPct}%</span>
+      <button class="linkish" onclick={() => viewer?.fit()}>Adatta</button>
+      <span class="sep">·</span>
+      <span>{file.width}×{file.height}</span>
+      {#if probe && viewMode === 'thermal'}
+        <span class="sep">·</span>
+        <span class="probe-read">x{probe.x} y{probe.y} → <strong>{fmt(probe.t)} °C</strong></span>
+      {/if}
+      <div class="grow"></div>
+      <span>{palette}{#if inverted} · invertita{/if}</span>
+      <span class="sep">·</span>
+      <span>
+        {#if !autoRange}{`${fmt(range.min)}–${fmt(range.max)} °C`}
+        {:else if folderRange && folderRangeScanning}scansione cartella…
+        {:else if folderScaleActive}{`scala cartella · ${fmt(range.min)}–${fmt(range.max)} °C`}
+        {:else if stretchPct > 0}{`stretch ${+stretchPct.toFixed(1)}% · ${fmt(range.min)}–${fmt(range.max)} °C`}
+        {:else}intervallo auto{/if}
+      </span>
+      {#if gps}<span class="sep">·</span><span title="Coordinate GPS presenti nella foto">GPS</span>{/if}
+    </footer>
+  {/if}
 </div>
 
 {#if showExif && file}
   <ExifModal {exif} metadata={file.metadata} {fileName} onclose={() => (showExif = false)} />
+{/if}
+{#if showHelp}
+  <HelpModal onclose={() => (showHelp = false)} />
+{/if}
+
+<Toasts />
+
+{#if bulkOpen}
+  <button type="button" class="sheet-scrim" aria-label="Chiudi" onclick={() => (bulkOpen = false)}></button>
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="Modifica in blocco" tabindex="-1" use:dialog>
+    <header>
+      <h2>Modifica in blocco</h2>
+      <button class="x" onclick={() => (bulkOpen = false)} aria-label="Chiudi">×</button>
+    </header>
+    <div class="sheet-body">
+      <div class="sel-row">
+        <span>{selectedCount} di {folder.length} selezionate</span>
+        <div class="grow"></div>
+        <button onclick={selectAll}>Tutte</button>
+        <button onclick={selectNone}>Nessuna</button>
+        <button onclick={invertSelection}>Inverti</button>
+      </div>
+
+      <p class="hint">
+        Copia dall’immagine corrente
+        {#if activePath}(<strong>{activePath.split('/').pop()}</strong>){/if}
+        alle selezionate: palette, intervallo, parametri termici, allineamento ed
+        etichette.
+      </p>
+
+      <fieldset class="area-modes" disabled={!rois.length}>
+        <legend>Aree</legend>
+        <label>
+          <input type="radio" name="bulkArea" value="none" bind:group={areaMode} />
+          <span><strong>Lascia invariate</strong><small>Le aree di ogni immagine restano come sono.</small></span>
+        </label>
+        <label>
+          <input type="radio" name="bulkArea" value="appearance" bind:group={areaMode} />
+          <span><strong>Uniforma l’aspetto</strong><small>Colore ed emissività delle aree con lo stesso nome vengono allineati a quelli correnti. Posizione e forma restano di ogni foto; le temperature possono cambiare se cambia l’emissività.</small></span>
+        </label>
+        <label>
+          <input type="radio" name="bulkArea" value="replace" bind:group={areaMode} />
+          <span><strong>Sostituisci</strong><small>Le aree correnti, posizioni incluse, rimpiazzano quelle di ogni immagine.</small></span>
+        </label>
+      </fieldset>
+      {#if !rois.length}
+        <p class="hint">L’immagine corrente non ha aree: le opzioni sopra sono disattivate.</p>
+      {/if}
+    </div>
+    <footer>
+      <button onclick={() => (bulkOpen = false)}>Annulla</button>
+      <button
+        class="primary"
+        disabled={!activePath || selectedCount === 0}
+        onclick={() => { applyToSelected(); bulkOpen = false; }}
+      >
+        Applica a {selectedCount} {selectedCount === 1 ? 'immagine' : 'immagini'}
+      </button>
+    </footer>
+  </div>
 {/if}
 
 <style>
@@ -1382,49 +1797,117 @@
      whole layout past the viewport — so `main` (and the canvas host inside it)
      ended up taller than the screen and `fit()` scaled to that phantom height.
      Pin the row to the viewport and let each column scroll on its own. */
+  .app { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
   .layout {
+    flex: 1; min-height: 0;
     display: grid; grid-template-columns: 300px 1fr;
-    grid-template-rows: minmax(0, 1fr); height: 100%; overflow: hidden;
+    grid-template-rows: minmax(0, 1fr); overflow: hidden;
   }
-  .layout.has-strip { grid-template-columns: 132px 300px 1fr; }
 
+  /* --- Top bar ------------------------------------------------------------ */
+  .topbar {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    height: 48px; padding: 0 12px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .topbar .grow { flex: 1; }
+  .brand { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; white-space: nowrap; }
+  .brand span { color: var(--accent); font-weight: 400; }
+  .topbar .cur {
+    font-size: 12px; color: var(--text); max-width: 240px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .topbar .cur.muted { color: var(--muted); }
+  .topbar > button {
+    flex: none; padding: 6px 12px; font-size: 13px;
+  }
+  .topbar .icon {
+    width: 30px; height: 30px; padding: 0; border-radius: 999px;
+    display: grid; place-items: center; font-size: 14px;
+  }
+
+  .menu { position: relative; flex: none; }
+  .menu > summary {
+    list-style: none; cursor: pointer; user-select: none;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 12px; font-size: 13px;
+  }
+  .menu > summary::-webkit-details-marker { display: none; }
+  .menu > summary::after { content: ' ▾'; color: var(--muted); }
+  .menu > summary:hover { border-color: var(--accent); }
+  .menu-pop {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 30;
+    min-width: 230px; padding: 4px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    display: grid; gap: 2px;
+  }
+  .menu-pop button, .menu-pop a {
+    display: block; width: 100%; text-align: left;
+    padding: 8px 10px; font-size: 13px; text-decoration: none;
+    color: var(--text); background: transparent; border: 0; border-radius: 5px; cursor: pointer;
+  }
+  .menu-pop button:hover, .menu-pop a:hover { background: var(--bg); border-color: transparent; }
+  .menu-pop button:disabled { color: var(--muted); cursor: default; background: transparent; }
+  .menu-pop hr { margin: 4px 2px; border: 0; border-top: 1px solid var(--line); }
+  .menu-hint { margin: 4px 6px 2px; font-size: 12px; color: var(--muted); line-height: 1.4; }
+
+  /* --- Status bar ------------------------------------------------------- */
+  .statusbar {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    height: 28px; padding: 0 12px;
+    background: var(--panel); border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .statusbar .grow { flex: 1; }
+  .statusbar .sep { opacity: 0.45; }
+  .statusbar .z { color: var(--text); }
+  .statusbar strong { color: var(--text); font-weight: 600; }
+  .statusbar .linkish { font-size: 12px; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+  .aside-empty { margin-top: 0; }
+
+  /* --- Filmstrip (navigation only) ------------------------------------- */
   .strip {
-    background: var(--panel); border-right: 1px solid var(--line);
-    min-height: 0; overflow-y: auto; padding: 8px;
-    display: flex; flex-direction: column; gap: 6px;
+    flex: none; min-width: 0;
+    background: var(--panel); border-top: 1px solid var(--line);
+    display: flex; flex-direction: column;
   }
-  .strip-head {
-    display: flex; justify-content: space-between; align-items: center;
-    font-size: 11px; color: var(--muted); padding: 2px 2px 4px;
+  .strip-bar {
+    display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+    font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
   }
-  .strip-sel {
-    display: grid; gap: 5px; padding: 0 2px 6px; margin-bottom: 2px;
-    border-bottom: 1px solid var(--line);
+  .strip-bar .grow { flex: 1; }
+  .strip-bar .toggle {
+    flex: none; background: transparent; border: 0; color: var(--muted);
+    cursor: pointer; padding: 2px 4px; font-size: 11px;
   }
-  .strip-sel-row { display: flex; flex-wrap: wrap; gap: 4px; }
-  .strip-sel-row button {
-    flex: 1 1 auto; padding: 3px 5px; font-size: 10.5px; line-height: 1.2;
-    background: var(--bg); border: 1px solid var(--line); border-radius: 3px;
-    color: var(--text); cursor: pointer;
+  .strip-bar .toggle:hover { color: var(--text); }
+  .strip-jobs { color: var(--accent); }
+  .strip-bar .bulk-open { flex: none; padding: 4px 10px; font-size: 12px; }
+  .pager { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+  .pager button { padding: 2px 8px; }
+
+  .strip-scroll {
+    display: flex; gap: 6px; padding: 0 10px 10px; overflow-x: auto;
+    scrollbar-width: thin;
   }
-  .strip-sel-row button:hover { border-color: var(--accent); color: var(--accent); }
-  .sel-apply { padding: 5px 4px; font-size: 11px; }
-  .sel-areas {
-    display: grid; gap: 3px; margin: 0; padding: 0; border: 0; min-width: 0;
-  }
-  .sel-areas:disabled { opacity: 0.4; }
-  .sel-areas legend {
-    padding: 0; font-size: 10.5px; color: var(--muted); text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .sel-check {
-    display: flex; align-items: flex-start; gap: 5px;
-    font-size: 10.5px; color: var(--muted); margin: 0; line-height: 1.25;
-  }
-  .sel-check input { width: auto; margin: 1px 0 0; accent-color: var(--accent); flex: none; }
-  .strip-hint { margin: 0; font-size: 10.5px; color: var(--muted); }
-  .thumb-wrap { position: relative; display: block; }
+  .thumb-wrap { position: relative; flex: none; }
   .thumb-wrap.busy .thumb img { opacity: 0.45; }
+  .thumb-wrap .thumb { height: 66px; }
+  .thumb-wrap.sel .thumb { outline: 2px solid var(--accent); outline-offset: -2px; border-color: var(--accent); }
+  .thumb-wrap .pick {
+    position: absolute; top: 3px; left: 3px; width: 15px; height: 15px; margin: 0;
+    accent-color: var(--accent); cursor: pointer; z-index: 1;
+    opacity: 0; transition: opacity 0.12s;
+  }
+  .thumb-wrap:hover .pick, .thumb-wrap.sel .pick, .thumb-wrap .pick:focus-visible { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .thumb-wrap .pick { transition: none; } }
+
   .thumb-spin {
     position: absolute; top: 50%; left: 50%; width: 16px; height: 16px;
     margin: -8px 0 0 -8px; border-radius: 50%;
@@ -1433,15 +1916,11 @@
   }
   @keyframes thumb-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .thumb-spin { animation: none; } }
-  .thumb-wrap .thumb { width: 100%; display: block; }
-  .thumb-wrap.sel .thumb { border-color: var(--accent); }
-  .thumb-wrap .pick {
-    position: absolute; top: 4px; left: 4px; width: 15px; height: 15px; margin: 0;
-    accent-color: var(--accent); cursor: pointer; z-index: 1;
-  }
+
   .thumb {
-    position: relative; padding: 0; border: 1px solid var(--line); border-radius: 4px;
-    background: #000; cursor: pointer; aspect-ratio: 4 / 3; overflow: hidden;
+    position: relative; display: block; flex: none;
+    padding: 0; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--canvas-bg); cursor: pointer; aspect-ratio: 4 / 3; overflow: hidden;
   }
   .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .thumb.on { outline: 2px solid var(--accent); border-color: var(--accent); }
@@ -1449,24 +1928,63 @@
     position: absolute; top: 3px; right: 3px; width: 7px; height: 7px;
     border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px #000;
   }
-  .pager {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 4px; font-size: 11px; color: var(--muted); margin-top: 4px;
+
+  /* --- Bulk-edit slide-over ------------------------------------------- */
+  .sheet-scrim {
+    position: fixed; inset: 0; z-index: 45; border: 0; padding: 0; border-radius: 0;
+    background: rgba(0, 0, 0, 0.4); cursor: default;
   }
-  .pager button { padding: 2px 8px; }
+  .sheet {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 46;
+    width: min(380px, 100%); display: flex; flex-direction: column;
+    background: var(--panel); border-left: 1px solid var(--line);
+    box-shadow: -12px 0 40px rgba(0, 0, 0, 0.4);
+  }
+  .sheet > header {
+    flex: none; display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line);
+  }
+  .sheet > header h2 {
+    font-size: 14px; margin: 0; text-transform: none; letter-spacing: 0; color: var(--text);
+  }
+  .sheet .x { padding: 2px 9px; font-size: 17px; line-height: 1; }
+  .sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px; }
+  .sheet > footer {
+    flex: none; display: flex; gap: 8px; justify-content: flex-end;
+    padding: 12px 16px; border-top: 1px solid var(--line);
+  }
+  .sheet > footer .primary {
+    background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600;
+  }
+  .sel-row {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: 12px; color: var(--muted); margin-bottom: 4px;
+  }
+  .sel-row .grow { flex: 1; }
+  .sel-row button { padding: 4px 8px; font-size: 12px; }
+  .area-modes {
+    display: grid; gap: 10px; margin: 12px 0 0; padding: 12px 0 0;
+    border: 0; border-top: 1px solid var(--line); min-width: 0;
+  }
+  .area-modes:disabled { opacity: 0.45; }
+  .area-modes legend {
+    padding: 0; font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted);
+  }
+  .area-modes label { display: flex; gap: 8px; align-items: flex-start; margin: 0; cursor: pointer; }
+  .area-modes input { flex: none; width: auto; margin: 2px 0 0; accent-color: var(--accent); }
+  .area-modes strong { display: block; font-size: 13px; color: var(--text); font-weight: 600; }
+  .area-modes small { display: block; font-size: var(--fs-sm); color: var(--muted); line-height: 1.45; margin-top: 3px; }
   .linkish { background: transparent; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-size: inherit; }
   aside {
     background: var(--panel); border-right: 1px solid var(--line);
     padding: 18px; min-height: 0; overflow-y: auto;
   }
-  h1 { font-size: 19px; margin: 0 0 18px; letter-spacing: -0.3px; }
-  h1 span { color: var(--accent); font-weight: 400; }
   h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted); margin: 0 0 8px; }
   section { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
   section > :global(*) { margin-bottom: 8px; }
 
   .tabs {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
     margin: 18px 0 0;
     border-bottom: 1px solid var(--line);
   }
@@ -1481,25 +1999,12 @@
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .check { display: flex; align-items: center; gap: 7px; color: var(--text); font-size: 13px; margin: 10px 0; }
   .check input { width: auto; accent-color: var(--accent); }
-  .file { font-size: 12px; color: var(--muted); margin: 8px 0 0; word-break: break-all; }
-  .toollink {
-    display: block; margin-top: 10px; padding: 8px 10px;
-    font-size: 12px; line-height: 1.4; text-decoration: none;
-    color: var(--muted); background: var(--bg);
-    border: 1px solid var(--line); border-radius: 6px;
-  }
-  .toollink:hover { border-color: var(--accent); color: var(--text); }
-  .error { font-size: 12px; color: #ff6b6b; margin: 10px 0 0; }
-  .notice { font-size: 12px; color: var(--accent); margin: 10px 0 0; }
-  .hint { font-size: 11.5px; color: var(--muted); line-height: 1.45; margin: 8px 0 0; }
+  .hint { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 8px 0 0; }
   .actions { display: grid; gap: 8px; }
   dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; margin: 0; font-size: 13px; }
   dt { color: var(--muted); }
   dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 
-  .tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-  .tools button { padding: 6px 2px; font-size: 11.5px; }
-  .tools button.active { background: var(--accent); color: #101216; border-color: var(--accent); }
   button.wide { width: 100%; }
   .rois { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 3px; }
   .rois li { display: grid; grid-template-columns: auto 1fr auto; align-items: center; border-radius: 5px; }
@@ -1518,7 +2023,7 @@
   }
   .dot {
     width: 9px; height: 9px; border-radius: 50%;
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+    box-shadow: 0 0 0 1px var(--line-strong);
   }
   .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tm { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -1528,26 +2033,41 @@
   .detail > * { margin-bottom: 6px; }
   details summary { font-size: 12px; color: var(--muted); cursor: pointer; margin-top: 10px; }
 
+  .advanced { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .advanced > summary {
+    margin: 0; list-style: none; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted);
+  }
+  .advanced > summary::-webkit-details-marker { display: none; }
+  .advanced > summary::before { content: '▸'; font-size: 10px; }
+  .advanced[open] > summary::before { content: '▾'; }
+  .advanced > summary:hover { color: var(--text); }
+  .adv { margin-top: 14px; }
+  .adv + .adv { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line); }
+  .adv > * { margin-bottom: 8px; }
+  .adv h3 {
+    font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: 0.6px;
+    color: var(--muted); margin: 0 0 8px;
+  }
+
   main { position: relative; min-height: 0; overflow: hidden; }
   .pane { position: absolute; inset: 0; }
   .pane.hidden { visibility: hidden; pointer-events: none; }
 
   .viewswitch {
-    position: absolute; top: 12px; left: 12px; z-index: 20;
-    display: inline-flex; gap: 2px; padding: 2px;
-    background: rgba(20, 22, 26, 0.82); backdrop-filter: blur(6px);
-    border: 1px solid var(--line); border-radius: 8px;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    flex: none; display: inline-flex; gap: 2px; padding: 2px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
   }
   .viewswitch button {
     display: inline-flex; align-items: center; gap: 6px;
     background: transparent; border: 0; border-radius: 6px;
-    padding: 6px 12px; font-size: 12px; color: var(--muted);
+    padding: 5px 12px; font-size: 12px; color: var(--muted);
   }
   .viewswitch button:hover:not(.on) { color: var(--text); }
-  .viewswitch button.on { background: var(--accent); color: #101216; }
+  .viewswitch button.on { background: var(--accent); color: var(--on-accent); }
   .viewswitch .badge {
-    font-size: 10.5px; font-variant-numeric: tabular-nums;
+    font-size: 11px; font-variant-numeric: tabular-nums;
     padding: 0 5px; border-radius: 999px; line-height: 1.5;
     background: rgba(0, 0, 0, 0.18);
   }
@@ -1555,11 +2075,16 @@
 
   .empty {
     height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 8px; color: var(--muted); text-align: center;
+    gap: 8px; color: var(--muted); text-align: center; padding: 24px;
   }
-  .probe {
-    position: absolute; right: 16px; bottom: 12px; padding: 6px 10px;
-    background: rgba(0, 0, 0, 0.6); border-radius: 6px; font-size: 13px;
-    font-variant-numeric: tabular-nums;
+  .empty.big { gap: 14px; max-width: 460px; margin: 0 auto; }
+  .empty.big h2 {
+    font-size: 17px; color: var(--text); text-transform: none; letter-spacing: 0; margin: 0;
+  }
+  .empty.big p { margin: 0; font-size: 13px; line-height: 1.55; }
+  .empty.big small { font-size: 12px; line-height: 1.5; }
+  .empty-actions { display: flex; gap: 8px; margin-top: 2px; }
+  .empty-actions .primary {
+    background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600;
   }
 </style>

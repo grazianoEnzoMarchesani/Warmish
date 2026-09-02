@@ -7,8 +7,7 @@
    * There is no scene graph here, so this component owns one explicit state
    * machine: what the pointer grabbed on press decides what the drag means.
    */
-  import { drawLegend, type CompositeResult } from '../core/render';
-  import { getLut } from '../core/colormap';
+  import { type CompositeResult } from '../core/render';
   import {
     nextRoiId, roiColor, roiContains, translateRoi,
     DEFAULT_ROI_EMISSIVITY, type Roi, type RoiStats,
@@ -18,17 +17,14 @@
 
   interface Props {
     image: CompositeResult | null;
-    palette: string;
-    inverted: boolean;
-    min: number;
-    max: number;
-    showLegend: boolean;
     rois: Roi[];
     stats: Map<string, RoiStats | null>;
     labels: RoiLabelSettings;
     tool: Tool;
     selectedId: string | null;
     onprobe?: (x: number, y: number) => void;
+    /** Current zoom as a whole percentage, for the status bar. */
+    onzoom?: (pct: number) => void;
     onselect?: (id: string | null) => void;
     /** Geometry changed by dragging; the parent recomputes statistics. */
     onroichange?: (roi: Roi) => void;
@@ -37,9 +33,8 @@
     ontoolreset?: () => void;
   }
   let {
-    image, palette, inverted, min, max, showLegend,
-    rois, stats, labels, tool, selectedId,
-    onprobe, onselect, onroichange, onroicreate, ondelete, ontoolreset,
+    image, rois, stats, labels, tool, selectedId,
+    onprobe, onzoom, onselect, onroichange, onroicreate, ondelete, ontoolreset,
   }: Props = $props();
 
   let canvas: HTMLCanvasElement;
@@ -111,11 +106,6 @@
       });
     }
     if (polyDraft.length) drawPolyDraft(ctx);
-
-    if (showLegend) {
-      const h = Math.min(240, host.clientHeight - 60);
-      drawLegend(ctx, getLut(palette), inverted, min, max, host.clientWidth - 88, 24, 22, h);
-    }
   }
 
   function drawPolyDraft(ctx: CanvasRenderingContext2D): void {
@@ -143,10 +133,14 @@
 
   $effect(() => {
     // Re-render whenever the composited image, the view transform or any ROI changes.
-    void image; void scale; void offset; void palette; void inverted; void min; void max;
-    void showLegend; void rois; void stats; void Object.values(labels); void selectedId; void draft;
+    void image; void scale; void offset;
+    void rois; void stats; void Object.values(labels); void selectedId; void draft;
     void polyDraft; void hotVertex;
     draw();
+  });
+
+  $effect(() => {
+    onzoom?.(Math.round(scale * 100));
   });
 
   $effect(() => {
@@ -383,22 +377,23 @@
     oncontextmenu={(e) => { e.preventDefault(); if (tool === 'polygon') closePolygon(); }}
     onpointerleave={() => onprobe?.(-1, -1)}
   ></canvas>
-  {#if image}
+  {#if image && (tool === 'polygon' || tool === 'rect' || tool === 'spot')}
     <div class="hud">
-      {Math.round(scale * 100)}% · rotella: zoom · trascina: pan
-      {#if tool === 'polygon'}· clic: vertice · doppio clic o Invio: chiudi{/if}
-      {#if tool === 'rect' || tool === 'spot'}· trascina per disegnare{/if}
+      {#if tool === 'polygon'}clic: vertice · doppio clic o Invio: chiudi{/if}
+      {#if tool === 'rect' || tool === 'spot'}trascina per disegnare{/if}
     </div>
   {/if}
 </div>
 
 <style>
-  .host { position: relative; width: 100%; height: 100%; overflow: hidden; background: #0d0f13; }
+  .host { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--canvas-bg); }
   canvas { display: block; touch-action: none; cursor: grab; }
   canvas:active { cursor: grabbing; }
   canvas.drawing, canvas.drawing:active { cursor: crosshair; }
   .hud {
     position: absolute; left: 12px; bottom: 12px; padding: 4px 8px;
-    background: rgba(0, 0, 0, 0.55); border-radius: 6px; font-size: 12px; color: var(--muted);
+    background: var(--overlay-bg); border: 1px solid var(--overlay-line); border-radius: 6px;
+    box-shadow: var(--overlay-shadow); font-size: 12px; color: var(--overlay-fg-dim);
+    backdrop-filter: blur(6px);
   }
 </style>

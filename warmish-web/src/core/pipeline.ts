@@ -15,10 +15,10 @@ import { parseThermalImage, type FlirMetadata, type ThermalFile } from './flir';
 import { parseCapture, parseGps, extractExifApp1, injectExifApp1 } from './exif';
 import { colorize, getLut } from './colormap';
 import {
-  canvasToPng, composite, context2d, createCanvas, drawLegendH, imageDataToCanvas,
+  canvasToJpeg, canvasToPng, composite, context2d, createCanvas, drawLegendH, imageDataToCanvas,
   type AnyCanvas, type BlendMode, type CompositeResult, type OverlayAlignment,
 } from './render';
-import { computeTemperatures, parametersFromMetadata, temperatureRange, type ThermalParameters } from './planck';
+import { computeTemperatures, parametersFromMetadata, percentileRange, temperatureRange, type ThermalParameters } from './planck';
 import { applyVisibleFilter, isIdentityFilter, type VisibleFilter } from './imageFilter';
 import { roiStatistics, type Roi, type RoiStats } from './roi';
 import { drawRois, type RoiLabelSettings } from './roiRender';
@@ -38,6 +38,9 @@ export interface RenderSettings {
   palette: string;
   inverted: boolean;
   autoRange: boolean;
+  /** Auto-range mode: 0 keeps the true min/max, >0 clips to that central
+   *  percentile of the pixels (linear stretch). Ignored when `autoRange` is off. */
+  stretchPct: number;
   manualMin: number;
   manualMax: number;
   showVisible: boolean;
@@ -76,7 +79,23 @@ interface Decorations {
   rois?: Roi[];
   stats?: Map<string, RoiStats | null>;
   labels?: RoiLabelSettings;
-  legend?: { palette: string; inverted: boolean; min: number; max: number };
+  legend?: { palette: string; inverted: boolean; min: number; max: number; histogram?: number[] };
+}
+
+/** Temperature distribution across `[min, max]`, coldest bin first — the flat
+ * echo of the in-canvas range scale, burned into the export legend. */
+const LEGEND_HIST_BINS = 48;
+function legendHistogram(temps: Float64Array, min: number, max: number): number[] {
+  const span = max - min || 1;
+  const bins = new Array<number>(LEGEND_HIST_BINS).fill(0);
+  for (let i = 0; i < temps.length; i++) {
+    const v = temps[i];
+    if (Number.isNaN(v) || v < min || v > max) continue;
+    let b = Math.floor(((v - min) / span) * LEGEND_HIST_BINS);
+    if (b < 0) b = 0; else if (b >= LEGEND_HIST_BINS) b = LEGEND_HIST_BINS - 1;
+    bins[b]++;
+  }
+  return bins;
 }
 
 /**
@@ -90,7 +109,7 @@ function decorate(view: CompositeResult, d: Decorations): AnyCanvas {
   const imgW = Math.round(view.width * scale);
   const imgH = Math.round(view.height * scale);
   const uiK = Math.max(1, imgW / 900);
-  const band = d.legend ? Math.round(46 * uiK) : 0;
+  const band = d.legend ? Math.round((d.legend.histogram?.length ? 74 : 46) * uiK) : 0;
 
   const out = createCanvas(imgW, imgH + band);
   const ctx = context2d(out);
@@ -114,7 +133,7 @@ function decorate(view: CompositeResult, d: Decorations): AnyCanvas {
   if (d.legend) {
     const m = Math.round(20 * uiK);
     drawLegendH(ctx, getLut(d.legend.palette), d.legend.inverted, d.legend.min, d.legend.max,
-      m, imgH + Math.round(4 * uiK), imgW - 2 * m, band - Math.round(8 * uiK), uiK);
+      m, imgH + Math.round(4 * uiK), imgW - 2 * m, band - Math.round(8 * uiK), uiK, d.legend.histogram);
   }
   return out;
 }
@@ -123,12 +142,56 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
+/**
+ * One decorated frame of a single image — the same pixels `processImage` would
+ * put in `sovrapposta.png` (overlay on) / `termica_aree.png` (ROIs) /
+ * `termica_annotata.png`, as a JPEG for on-screen use. Used by the map tour so
+ * the panel shows exactly what an export would produce. Not an export path — it
+ * never touches EXIF, sessions or the zip.
+ */
+export async function renderHeroImage(bytes: Uint8Array, s: RenderSettings): Promise<Blob> {
+  const parsed: ThermalFile = parseThermalImage(bytes);
+  const params = resolveParameters(parsed.metadata, s.parameters);
+  const temps = computeTemperatures(parsed.raw, params);
+  const auto = s.stretchPct > 0 ? percentileRange(temps, s.stretchPct) : temperatureRange(temps);
+  const range = s.autoRange ? auto : { min: s.manualMin, max: s.manualMax };
+
+  const thermal = imageDataToCanvas(
+    colorize(temps, { palette: s.palette, inverted: s.inverted, min: range.min, max: range.max }),
+    parsed.width, parsed.height,
+  );
+
+  const stats = new Map<string, RoiStats | null>();
+  for (const roi of s.rois) {
+    stats.set(roi.id, roiStatistics(roi, parsed.raw, parsed.width, parsed.height, params));
+  }
+  const legend = {
+    palette: s.palette, inverted: s.inverted, min: range.min, max: range.max,
+    histogram: legendHistogram(temps, range.min, range.max),
+  };
+
+  let view: CompositeResult;
+  if (s.showVisible && parsed.visible) {
+    const bitmap = await createImageBitmap(new Blob([parsed.visible as BlobPart], { type: 'image/jpeg' }));
+    const visible = isIdentityFilter(s.visibleFilter) ? bitmap : applyVisibleFilter(bitmap, s.visibleFilter);
+    view = composite({
+      thermal, width: parsed.width, height: parsed.height, visible,
+      blend: s.blend, opacity: s.opacity, alignment: s.alignment,
+    });
+    bitmap.close();
+  } else {
+    view = composite({ thermal, width: parsed.width, height: parsed.height, visible: null, blend: s.blend, opacity: 1 });
+  }
+
+  return canvasToJpeg(decorate(view, { rois: s.rois, stats, labels: s.labels, legend }), 0.85);
+}
+
 /** Everything a single image contributes to an export. */
 export async function processImage(bytes: Uint8Array, folder: string, s: RenderSettings): Promise<ImageResult> {
   const parsed: ThermalFile = parseThermalImage(bytes);
   const params = resolveParameters(parsed.metadata, s.parameters);
   const temps = computeTemperatures(parsed.raw, params);
-  const auto = temperatureRange(temps);
+  const auto = s.stretchPct > 0 ? percentileRange(temps, s.stretchPct) : temperatureRange(temps);
   const range = s.autoRange ? auto : { min: s.manualMin, max: s.manualMax };
   const capture = parseCapture(bytes);
   const gps = parseGps(bytes);
@@ -143,7 +206,10 @@ export async function processImage(bytes: Uint8Array, folder: string, s: RenderS
     stats.set(roi.id, roiStatistics(roi, parsed.raw, parsed.width, parsed.height, params));
   }
 
-  const legend = { palette: s.palette, inverted: s.inverted, min: range.min, max: range.max };
+  const legend = {
+    palette: s.palette, inverted: s.inverted, min: range.min, max: range.max,
+    histogram: legendHistogram(temps, range.min, range.max),
+  };
   const outputs: ProcessedFile[] = [];
 
   const plain = composite({ thermal, width: parsed.width, height: parsed.height, visible: null, blend: s.blend, opacity: 1 });
@@ -179,7 +245,7 @@ export async function processImage(bytes: Uint8Array, folder: string, s: RenderS
 
   const sessionJson = JSON.stringify(buildSession({
     parameters: params, objectDistance: parsed.metadata.ObjectDistance,
-    palette: s.palette, inverted: s.inverted, autoRange: s.autoRange,
+    palette: s.palette, inverted: s.inverted, autoRange: s.autoRange, stretchPct: s.stretchPct,
     manualMin: s.manualMin, manualMax: s.manualMax, showVisible: s.showVisible,
     blend: s.blend, opacity: s.opacity, alignment: s.alignment, visibleFilter: s.visibleFilter,
     labels: s.labels, rois: s.rois,
