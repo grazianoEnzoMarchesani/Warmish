@@ -412,11 +412,16 @@ try {
   await page.waitForSelector('.tour-panel', { timeout: 5000 });
   check('tour lays out one progress dot per stop',
     (await page.locator('.tour-dot').count()) === 2);
-  await page.waitForSelector('.tour-img.front', { timeout: 20_000 });
-  const tourSrc = await page.locator('.tour-img.front').first().getAttribute('src');
+  await page.waitForSelector('.tour-img', { timeout: 20_000 });
+  const tourSrc = await page.locator('.tour-img').first().getAttribute('src');
   check('tour panel shows a rendered frame', !!tourSrc && tourSrc.startsWith('blob:'));
   check('the shot route is drawn on the map',
     (await page.locator('path.wm-route-done').count()) === 1);
+  check('the tour hides the shell chrome',
+    !(await page.locator('.topbar').isVisible())
+    && !(await page.locator('.strip').isVisible())
+    && !(await page.locator('.statusbar').isVisible())
+    && !(await page.locator('aside').isVisible()));
   await page.screenshot({ path: join(SHOTS, 'map-tour.png') });
   await page.locator('.tour-btn', { hasText: '›' }).click();
   await page.waitForTimeout(1200);
@@ -426,6 +431,8 @@ try {
   await page.keyboard.press('Escape');
   await page.waitForSelector('.tour-panel', { state: 'detached', timeout: 4000 });
   check('Escape ends the tour', (await page.locator('.tour-panel').count()) === 0);
+  check('ending the tour restores the shell chrome',
+    await page.locator('.topbar').isVisible() && await page.locator('.statusbar').isVisible());
 
   // Single-image path: one marker, its popup returns to the thermal view.
   await page.reload();

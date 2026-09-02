@@ -35,22 +35,30 @@
   import L from 'leaflet';
   import 'leaflet/dist/leaflet.css';
   import type * as PM from 'protomaps-leaflet';
+  import { routeAroundBuildings } from './routeAround';
 
   let {
     points,
     onopen,
     tourImage,
+    ontour,
   }: {
     points: MapPoint[];
     onopen: (path: string) => void;
     /** Renders a big processed frame for a tour stop; caller owns the URL. */
     tourImage?: (path: string) => Promise<string | null>;
+    /** Fires when the guided tour starts (true) and ends (false), so the shell
+     *  can strip its chrome down to just the map for the fly-through. */
+    ontour?: (active: boolean) => void;
   } = $props();
 
   let host: HTMLDivElement;
   let map: L.Map | null = null;
   let markerLayer: L.LayerGroup | null = null;
   let fittedOnce = false;
+  /** Name of the active basemap — the tour only bends its trail around
+   *  buildings while a "Minimal" (OpenFreeMap vector) style is showing. */
+  let currentBasemap = '';
 
   const reduceMotion =
     typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -259,10 +267,14 @@
     // Cluster by on-screen distance at the current zoom: pins that would overlap
     // merge into one counter and split again as you zoom in. FLIR cameras often
     // write the same coarse fix for a whole session, so this is the common case.
+    // During the tour we never cluster: the camera drives the zoom (a tight
+    // framing would leave a stale "3" counter that never re-splits), so every
+    // stop keeps its own pin.
+    const radius = tourActive ? 0 : 36;
     const groups: { items: MapPoint[]; x: number; y: number }[] = [];
     for (const p of points) {
       const pt = map.latLngToContainerPoint([p.lat, p.lon]);
-      const g = groups.find((g) => Math.hypot(g.x - pt.x, g.y - pt.y) < 36);
+      const g = radius > 0 ? groups.find((g) => Math.hypot(g.x - pt.x, g.y - pt.y) < radius) : undefined;
       if (g) g.items.push(p);
       else groups.push({ items: [p], x: pt.x, y: pt.y });
     }
@@ -310,8 +322,10 @@
     let start = initialBasemap() as string;
     if (!(start in all)) start = 'Satellite';
     all[start].addTo(map);
+    currentBasemap = start;
     L.control.layers(all, {}, { position: 'topright' }).addTo(map);
     map.on('baselayerchange', (e: L.LayersControlEvent) => {
+      currentBasemap = e.name;
       try { localStorage.setItem('warmish.basemap', e.name); } catch { /* private mode */ }
     });
     renderMarkers();
@@ -355,6 +369,7 @@
 
     return () => {
       window.removeEventListener('keydown', onTourKey, true);
+      if (tourActive) ontour?.(false);
       clearTourTimers();
       for (const url of urlCache.values()) URL.revokeObjectURL(url);
       urlCache.clear();
@@ -428,6 +443,7 @@
 
   let routeLine: L.Polyline | null = null;
   let doneLine: L.Polyline | null = null;
+  let doneBlocked: L.Polyline | null = null;
   let traveller: L.Marker | null = null;
   let tourRaf: number | null = null;
   let tourTimer: ReturnType<typeof setTimeout> | undefined;
@@ -448,6 +464,68 @@
   const ll = (p: MapPoint): L.LatLngTuple => [p.lat, p.lon];
   const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
   const speed = () => (reduceMotion ? { fly: 0, dwell: 2000 } : SPEEDS[tourSpeed]);
+
+  // --- Trail geometry ------------------------------------------------------
+  // One polyline per hop between consecutive stops. Each hop starts as a plain
+  // straight line; `computeDetours()` then swaps in versions bent around
+  // building footprints (see routeAround.ts) once the vector tiles are decoded.
+  // `segClear[k]` is false when the hop had to cross a building anyway — that
+  // one is drawn dashed to tell the viewer the gap couldn't be closed.
+  // `segPaths[k]` runs from ordered[k] to ordered[k + 1].
+  let segPaths: L.LatLngTuple[][] = [];
+  let segClear: boolean[] = [];
+  let detourGen = 0;
+
+  function resetSegs(): void {
+    segPaths = ordered.slice(1).map((p, i) => [ll(ordered[i]), ll(p)]);
+    segClear = ordered.slice(1).map(() => true);
+  }
+
+  /** Every hop flattened — the faint grey preview of the whole route. */
+  function fullRoute(): L.LatLngTuple[] {
+    const out: L.LatLngTuple[] = [];
+    for (const seg of segPaths) for (let j = out.length ? 1 : 0; j < seg.length; j++) out.push(seg[j]);
+    return out;
+  }
+
+  /** Completed hops before stop `n` whose `clear` flag matches, each as its own
+   *  sub-array so a single polyline can carry them all. */
+  function doneSegs(n: number, clear: boolean): L.LatLngTuple[][] {
+    const out: L.LatLngTuple[][] = [];
+    for (let k = 0; k < n && k < segPaths.length; k++) {
+      if ((segClear[k] !== false) === clear) out.push(segPaths[k]);
+    }
+    return out;
+  }
+
+  /** Repaint both completed-trail layers for the traveller resting at stop `n`. */
+  function paintDone(n: number): void {
+    doneLine?.setLatLngs(doneSegs(n, true));
+    doneBlocked?.setLatLngs(doneSegs(n, false));
+  }
+
+  const tupDist = (a: L.LatLngTuple, b: L.LatLngTuple) =>
+    Math.hypot(a[0] - b[0], (a[1] - b[1]) * Math.cos((a[0] * Math.PI) / 180));
+
+  /** Fetch the building-aware trail and fold it in without interrupting the
+   *  fly-through. Only runs on a "Minimal" basemap (its OpenFreeMap tiles are
+   *  the footprint source); any failure just leaves the straight lines. */
+  async function computeDetours(token: number): Promise<void> {
+    if (!(MINIMAL_NAMES as readonly string[]).includes(currentBasemap)) return;
+    try {
+      const res = await routeAroundBuildings(
+        ordered.map((p) => [p.lat, p.lon] as [number, number]),
+        OFM_TILEJSON,
+      );
+      if (token !== detourGen || !tourActive || res.length !== ordered.length - 1) return;
+      segPaths = res.map((s) => s.path.map(([la, lo]) => [la, lo] as L.LatLngTuple));
+      segClear = res.map((s) => s.clear);
+      routeLine?.setLatLngs(fullRoute());
+      if (!tourMoving) paintDone(tourIdx);
+    } catch (err) {
+      console.warn('Percorso attorno agli edifici non disponibile.', err);
+    }
+  }
 
   /** Zoom the camera should hold at a stop, per the chosen framing. `largo`
    *  fits the whole route; the fixed framings clamp to what the tiles allow. */
@@ -519,8 +597,7 @@
     tourMoving = true;
 
     // Freeze the trail at its current extent and park the traveller.
-    const frozen = ordered.slice(0, fwd ? to : to + 1).map(ll);
-    doneLine?.setLatLngs(frozen.length ? frozen : [ll(dest)]);
+    paintDone(fwd ? from : to);
     traveller?.setLatLng(ll(fwd ? ordered[from] : dest));
 
     let ran = false;
@@ -529,7 +606,7 @@
       clearTimeout(tourFlyGuard);
       if (ran || gen !== tourGen) return;
       ran = true;
-      if (fwd) drawSegment(to, ordered[from], dest, frozen, gen);
+      if (fwd) drawSegment(to, gen);
       else { tourMoving = false; arriveAtStop(to, gen); }
     };
 
@@ -544,24 +621,38 @@
     }
   }
 
-  /** Grow the trail from `src` to `dest` over static ground. */
-  function drawSegment(to: number, src: MapPoint, dest: MapPoint, frozen: L.LatLngTuple[], gen: number) {
+  /** Grow the trail along the hop into stop `to` over static ground. The hop is
+   *  a polyline (straight, or bent around buildings), so the traveller walks it
+   *  by arc length rather than lerping between two points. It grows into the
+   *  solid layer, or the dashed one when the hop couldn't dodge a building. */
+  function drawSegment(to: number, gen: number) {
+    const k = to - 1;
+    const seg = segPaths[k] ?? [ll(ordered[k]), ll(ordered[to])];
+    const clear = segClear[k] !== false;
+    const grow = clear ? doneLine : doneBlocked;
+    const base = doneSegs(k, clear);
+    const cum = [0];
+    for (let i = 1; i < seg.length; i++) cum.push(cum[i - 1] + tupDist(seg[i - 1], seg[i]));
+    const total = cum[cum.length - 1] || 1;
     const drawMs = reduceMotion ? 0 : 640;
     const t0 = performance.now();
     const tick = () => {
       if (gen !== tourGen) return;
       const raw = drawMs <= 0 ? 1 : Math.min(1, (performance.now() - t0) / drawMs);
-      const e = ease(raw);
+      const target = ease(raw) * total;
+      let i = 1;
+      while (i < seg.length - 1 && cum[i] < target) i++;
+      const t = (target - cum[i - 1]) / Math.max(1e-9, cum[i] - cum[i - 1]);
       const p: L.LatLngTuple = [
-        src.lat + (dest.lat - src.lat) * e,
-        src.lon + (dest.lon - src.lon) * e,
+        seg[i - 1][0] + (seg[i][0] - seg[i - 1][0]) * t,
+        seg[i - 1][1] + (seg[i][1] - seg[i - 1][1]) * t,
       ];
       traveller?.setLatLng(p);
-      doneLine?.setLatLngs([...frozen, p]);
+      grow?.setLatLngs([...base, [...seg.slice(0, i), p]]);
       if (raw < 1) { tourRaf = requestAnimationFrame(tick); return; }
       tourRaf = null;
-      doneLine?.setLatLngs(ordered.slice(0, to + 1).map(ll));
-      traveller?.setLatLng(ll(dest));
+      paintDone(to);
+      traveller?.setLatLng(ll(ordered[to]));
       tourMoving = false;
       arriveAtStop(to, gen);
     };
@@ -614,15 +705,23 @@
     tourPlaying = true;
     tourIdx = 0;
     imgLayers = [];
+    ontour?.(true);
 
     const coords = ordered.map(ll);
-    routeLine = L.polyline(coords, {
+    resetSegs();
+    const detourToken = ++detourGen;
+    routeLine = L.polyline(fullRoute(), {
       className: 'wm-route', interactive: false,
       color: '#8a94a6', weight: 2, opacity: 0.55, dashArray: '2 7',
     }).addTo(map);
-    doneLine = L.polyline([coords[0]], {
+    doneLine = L.polyline([], {
       className: 'wm-route-done', interactive: false,
       color: '#ff8a3d', weight: 3.5, opacity: 0.95, lineCap: 'round', lineJoin: 'round',
+    }).addTo(map);
+    // Hops that couldn't dodge a building: same orange, kept dashed to say so.
+    doneBlocked = L.polyline([], {
+      className: 'wm-route-blocked', interactive: false,
+      color: '#ff8a3d', weight: 3.5, opacity: 0.9, dashArray: '3 7', lineCap: 'round', lineJoin: 'round',
     }).addTo(map);
     traveller = L.marker(coords[0], {
       icon: L.divIcon({ className: 'wm-traveller-wrap', html: '<span class="wm-traveller"></span>', iconSize: [18, 18], iconAnchor: [9, 9] }),
@@ -630,20 +729,28 @@
     }).addTo(map);
 
     map.fitBounds(L.latLngBounds(coords).pad(0.2), { animate: false });
+    renderMarkers(); // redraw un-clustered — one pin per stop for the whole tour
     // Let the fit settle a frame, then set off.
     requestAnimationFrame(() => { if (tourActive) goToStop(0); });
+    // Bend the trail around buildings in the background; it folds itself in.
+    void computeDetours(detourToken);
   }
 
   function endTour() {
     tourGen++;
+    detourGen++;
     clearTourTimers();
     tourActive = false;
     tourPlaying = false;
     tourMoving = false;
-    routeLine?.remove(); doneLine?.remove(); traveller?.remove();
-    routeLine = doneLine = traveller = null;
+    ontour?.(false);
+    routeLine?.remove(); doneLine?.remove(); doneBlocked?.remove(); traveller?.remove();
+    routeLine = doneLine = doneBlocked = traveller = null;
+    segPaths = [];
+    segClear = [];
     imgLayers = [];
     imgLoading = false;
+    renderMarkers(); // back to the clustered view
     if (map && ordered.length) {
       map.flyToBounds(L.latLngBounds(ordered.map(ll)).pad(0.2), {
         animate: !reduceMotion, duration: 0.6, maxZoom: 17,
@@ -977,8 +1084,11 @@
   }
   /* Keep the tile attribution readable — the panel sits over its usual corner. */
   .wrap.touring :global(.leaflet-bottom.leaflet-right) { right: auto; left: 0; }
+  /* The shell's view-mode switch is hidden during the tour — reclaim its gap. */
+  .wrap.touring :global(.leaflet-top.leaflet-left) { top: 0; }
   :global(.wm-route) { stroke: var(--muted); }
   :global(.wm-route-done) { stroke: var(--accent); }
+  :global(.wm-route-blocked) { stroke: var(--accent); }
   :global(.wm-traveller-wrap) { background: transparent; border: 0; }
   :global(.wm-traveller) {
     display: block; width: 14px; height: 14px; border-radius: 50%;

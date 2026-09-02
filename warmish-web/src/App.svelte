@@ -292,7 +292,12 @@
     return out;
   }
 
+  /** True while MapView is running its cinematic tour — the shell hides its
+   *  chrome (sidebar, filmstrip, top and status bars) to give the map the room. */
+  let tourMode = $state(false);
+
   function setViewMode(mode: 'thermal' | 'map') {
+    if (mode !== 'map') tourMode = false;
     viewMode = mode;
     if (mode === 'map') {
       currentThumb = thumbDataUrl();
@@ -1262,7 +1267,7 @@
   }}
 />
 
-<div class="app" ondragover={(e) => e.preventDefault()} ondrop={onDrop} role="application">
+<div class="app" class:touring={tourMode} ondragover={(e) => e.preventDefault()} ondrop={onDrop} role="application">
   <header class="topbar">
     <h1 class="brand">Warmish <span>Web</span></h1>
 
@@ -1624,7 +1629,12 @@
       {/if}
       {#if viewMode === 'map'}
         <div class="pane">
-          <MapView points={mapPoints} onopen={openFromMap} tourImage={renderTourImage} />
+          <MapView
+            points={mapPoints}
+            onopen={openFromMap}
+            tourImage={renderTourImage}
+            ontour={(active) => (tourMode = active)}
+          />
         </div>
       {/if}
     {:else}
@@ -1803,6 +1813,16 @@
     display: grid; grid-template-columns: 300px 1fr;
     grid-template-rows: minmax(0, 1fr); overflow: hidden;
   }
+
+  /* Map tour: strip the shell to just the map. MapView's own panel (with its
+     ✕ / Esc) is the only way out, and leaving restores everything. */
+  .app.touring > .topbar,
+  .app.touring > .strip,
+  .app.touring > .statusbar,
+  .app.touring .layout > aside {
+    display: none;
+  }
+  .app.touring .layout { grid-template-columns: 1fr; }
 
   /* --- Top bar ------------------------------------------------------------ */
   .topbar {
