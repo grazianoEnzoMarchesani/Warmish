@@ -31,6 +31,7 @@
    * map opens; if it (or OpenFreeMap) can't be reached we fall back to Esri.
    */
   import { onMount } from 'svelte';
+  import { fade } from 'svelte/transition';
   import L from 'leaflet';
   import 'leaflet/dist/leaflet.css';
   import type * as PM from 'protomaps-leaflet';
@@ -376,7 +377,16 @@
   // cross-fade. Everything here is time-based so `prefers-reduced-motion` just
   // sets the durations to zero and the same code lands on the final state.
 
-  const STOP_ZOOM = 17;
+  // Camera framing for each stop: `largo` keeps the whole route in view (zoom
+  // derived from its bounds), `medio` and `stretto` are fixed zooms — the tighter
+  // the framing, the more of the ground you can actually make out under the pin.
+  const FRAMINGS = {
+    largo: { zoom: null, label: 'largo' },
+    medio: { zoom: 17, label: 'medio' },
+    stretto: { zoom: 19, label: 'stretto' },
+  } as const;
+  type Framing = keyof typeof FRAMINGS;
+
   const SPEEDS = {
     lento: { fly: 3.4, dwell: 4200 },
     normale: { fly: 2.2, dwell: 2800 },
@@ -407,6 +417,14 @@
       } catch { return 'normale'; }
     })(),
   );
+  let tourFraming = $state<Framing>(
+    (() => {
+      try {
+        const s = localStorage.getItem('warmish.tourFraming');
+        return s === 'largo' || s === 'stretto' ? s : 'medio';
+      } catch { return 'medio'; }
+    })(),
+  );
 
   let routeLine: L.Polyline | null = null;
   let doneLine: L.Polyline | null = null;
@@ -417,9 +435,11 @@
   let tourMoveEnd: (() => void) | null = null;
   let tourGen = 0;
 
-  // Panel image, kept as up-to-two layers so a new frame can cross-fade in.
+  // Panel image. One entry at a time, keyed by id: when it changes Svelte plays
+  // an out-transition on the old <img> and an in-transition on the new one, so
+  // the two overlap for a real crossfade (see `transition:fade` in the markup).
+  const FADE_MS = 700;
   let imgLayers = $state<{ id: number; src: string }[]>([]);
-  let frontId = $state(-1);
   let imgLoading = $state(false);
   let layerSeq = 0;
   const urlCache = new Map<string, string>();
@@ -428,6 +448,16 @@
   const ll = (p: MapPoint): L.LatLngTuple => [p.lat, p.lon];
   const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
   const speed = () => (reduceMotion ? { fly: 0, dwell: 2000 } : SPEEDS[tourSpeed]);
+
+  /** Zoom the camera should hold at a stop, per the chosen framing. `largo`
+   *  fits the whole route; the fixed framings clamp to what the tiles allow. */
+  function stopZoom(): number {
+    const z = FRAMINGS[tourFraming].zoom;
+    if (typeof z === 'number') return z;
+    if (!map || ordered.length < 2) return 15;
+    const b = L.latLngBounds(ordered.map(ll)).pad(0.2);
+    return Math.min(map.getBoundsZoom(b), 16);
+  }
 
   function fmtStopTime(ms: number | null): string {
     if (ms === null) return '';
@@ -462,12 +492,7 @@
     if (gen !== tourGen) return;
     imgLoading = false;
     if (!url) return; // keep whatever is on screen
-    const id = ++layerSeq;
-    imgLayers = [...imgLayers, { id, src: url }].slice(-2);
-    frontId = id;
-    setTimeout(() => {
-      if (frontId === id) imgLayers = imgLayers.filter((l) => l.id === id);
-    }, 520);
+    imgLayers = [{ id: ++layerSeq, src: url }];
   }
 
   function clearTourTimers() {
@@ -484,12 +509,13 @@
    * pump); once the map is settled the trail + traveller draw the last segment
    * over static ground, so the line stays pinned and simply grows.
    */
-  function flyToStop(to: number, from: number, gen: number) {
+  function flyToStop(to: number, from: number, gen: number, snap = false) {
     if (!map) return;
     const dest = ordered[to];
     const fwd = to === from + 1;
-    const target = panelOffsetLatLng(ll(dest));
-    const animate = !reduceMotion && speed().fly > 0;
+    const z = stopZoom();
+    const target = panelOffsetLatLng(ll(dest), z);
+    const animate = !snap && !reduceMotion && speed().fly > 0;
     tourMoving = true;
 
     // Freeze the trail at its current extent and park the traveller.
@@ -508,13 +534,13 @@
     };
 
     if (!animate) {
-      map.setView(target, STOP_ZOOM, { animate: false });
+      map.setView(target, z, { animate: false });
       proceed();
     } else {
       tourMoveEnd = proceed;
       map.on('moveend', proceed);
       tourFlyGuard = setTimeout(proceed, speed().fly * 1000 + 600);
-      map.flyTo(target, STOP_ZOOM, { duration: speed().fly, easeLinearity: 0.25 });
+      map.flyTo(target, z, { duration: speed().fly, easeLinearity: 0.25 });
     }
   }
 
@@ -543,15 +569,15 @@
   }
 
   /** Shift a target so its point sits centred in the map area left of the panel. */
-  function panelOffsetLatLng(target: L.LatLngTuple): L.LatLngTuple {
+  function panelOffsetLatLng(target: L.LatLngTuple, z: number): L.LatLngTuple {
     if (!map) return target;
     const panel = host.parentElement?.querySelector('.tour-panel') as HTMLElement | null;
     const w = panel ? panel.getBoundingClientRect().width : 0;
     // Skip the shift when the panel nearly fills the map (mobile / narrow).
     if (!w || w > map.getSize().x * 0.62) return target;
-    const pt = map.project(target, STOP_ZOOM);
+    const pt = map.project(target, z);
     pt.x += w / 2;
-    const p = map.unproject(pt, STOP_ZOOM);
+    const p = map.unproject(pt, z);
     return [p.lat, p.lng];
   }
 
@@ -564,17 +590,21 @@
     }
   }
 
-  function goToStop(i: number) {
+  function goToStop(i: number, snap = false) {
     if (!tourActive) return;
     const to = Math.max(0, Math.min(ordered.length - 1, i));
     const from = tourIdx;
     const gen = ++tourGen;
     clearTourTimers();
+    // Kill any pan/zoom still in flight. Starting a new move over a running one
+    // can leave Leaflet's overlay pane mid-transform, so the frozen trail looks
+    // shifted and rescaled until the next clean redraw.
+    map?.stop();
     tourIdx = to;
     void showImage(ordered[to].path, gen);
     const nextP = ordered[to + 1];
     if (nextP) void fetchImage(nextP.path);
-    flyToStop(to, from, gen);
+    flyToStop(to, from, gen, snap);
   }
 
   function startTour() {
@@ -583,7 +613,6 @@
     tourActive = true;
     tourPlaying = true;
     tourIdx = 0;
-    frontId = -1;
     imgLayers = [];
 
     const coords = ordered.map(ll);
@@ -614,7 +643,6 @@
     routeLine?.remove(); doneLine?.remove(); traveller?.remove();
     routeLine = doneLine = traveller = null;
     imgLayers = [];
-    frontId = -1;
     imgLoading = false;
     if (map && ordered.length) {
       map.flyToBounds(L.latLngBounds(ordered.map(ll)).pad(0.2), {
@@ -636,13 +664,22 @@
 
   function stepTo(i: number) {
     if (!tourActive) return;
-    goToStop(i);
+    // Manual jumps (‹ › buttons, progress dots) snap straight there — no flight.
+    goToStop(i, true);
   }
 
   function cycleSpeed() {
     const order: Speed[] = ['lento', 'normale', 'veloce'];
     tourSpeed = order[(order.indexOf(tourSpeed) + 1) % order.length];
     try { localStorage.setItem('warmish.tourSpeed', tourSpeed); } catch { /* private mode */ }
+  }
+
+  function cycleFraming() {
+    const order: Framing[] = ['largo', 'medio', 'stretto'];
+    tourFraming = order[(order.indexOf(tourFraming) + 1) % order.length];
+    try { localStorage.setItem('warmish.tourFraming', tourFraming); } catch { /* private mode */ }
+    // Re-frame the current stop right away so the choice is visible.
+    if (tourActive) goToStop(tourIdx, true);
   }
 
   function onTourKey(ev: KeyboardEvent) {
@@ -683,10 +720,10 @@
         {#each imgLayers as layer (layer.id)}
           <img
             class="tour-img"
-            class:front={layer.id === frontId}
             src={layer.src}
             alt={`Immagine elaborata di ${cur?.name ?? ''}`}
             draggable="false"
+            transition:fade={{ duration: reduceMotion ? 0 : FADE_MS }}
           />
         {/each}
         {#if imgLoading && imgLayers.length === 0}
@@ -725,7 +762,17 @@
           </button>
           <button class="tour-btn" onclick={() => stepTo(tourIdx + 1)} disabled={tourIdx >= ordered.length - 1}
             aria-label="Tappa successiva" title="Tappa successiva (→)">&rsaquo;</button>
-          <button class="tour-btn speed" onclick={cycleSpeed} title="Velocità del tour">{tourSpeed}</button>
+          <button class="tour-btn framing" onclick={cycleFraming}
+            title="Inquadratura: campo largo / medio / stretto">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 8h3l1.6-2.2h6.8L17 8h3v11H4z" />
+              <circle cx="12" cy="13" r="3.1" />
+            </svg>{FRAMINGS[tourFraming].label}</button>
+          <button class="tour-btn speed" onclick={cycleSpeed} title="Velocità del tour">
+            <svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M3 17.6c0-2.5 2-4.3 4.8-4.3.9 0 1.7.2 2.3.5.5-1.3 1.6-2.4 3.1-3-.6-1.3-1.1-3.2-1.1-5.4 0-1.9.5-3 1.2-3 .8 0 1.6 1.2 2.1 3.1.4 1.4.5 2.8.5 3.8.8-.2 1.5-.2 2.2 0 1.6.5 2.7 1.6 2.7 2.9 0 1-.7 1.7-1.8 1.9-.6.1-1.2.1-1.9 0 .2.5.3 1 .3 1.5 0 1.9-1.6 3.4-4 3.4H7.2C4.8 21.9 3 20.1 3 17.6Z" />
+            </svg>{tourSpeed}</button>
           <button class="tour-btn close" onclick={endTour} aria-label="Esci dal tour" title="Esci (Esc)">✕</button>
         </div>
       </div>
@@ -962,9 +1009,8 @@
   }
   .tour-img {
     position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: contain; opacity: 0; transition: opacity 0.5s ease;
+    object-fit: contain;
   }
-  .tour-img.front { opacity: 1; }
   .tour-spin {
     position: absolute; left: 50%; top: 50%; width: 30px; height: 30px;
     margin: -15px 0 0 -15px; border-radius: 50%;
@@ -1004,7 +1050,9 @@
   .tour-btn:hover:not(:disabled) { border-color: var(--accent); }
   .tour-btn:disabled { opacity: 0.4; cursor: default; }
   .tour-btn.play { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-size: 11px; }
-  .tour-btn.speed { text-transform: capitalize; font-size: 11.5px; font-weight: 600; }
+  .tour-btn.speed,
+  .tour-btn.framing { text-transform: capitalize; font-size: 11.5px; font-weight: 600; gap: 5px; }
+  .tour-btn .ico { width: 14px; height: 14px; flex: none; color: var(--muted); }
   .tour-btn.close { margin-left: auto; }
 
   @media (max-width: 760px) {
@@ -1012,7 +1060,6 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .tour-panel { animation: none; }
-    .tour-img { transition: opacity 0.12s linear; }
     .tour-spin { animation-duration: 0s; }
     :global(.wm-traveller)::after { animation: none; opacity: 0; }
   }
