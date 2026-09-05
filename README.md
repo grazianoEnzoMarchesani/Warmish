@@ -7,6 +7,10 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16887040.svg)](https://doi.org/10.5281/zenodo.16887040)
 
+> **Looking for the browser version?** A static, client-side rewrite of Warmish —
+> FLIR thermal processing entirely in the browser, no upload and no ExifTool —
+> lives in its own repository: **[Warmish-Web](https://github.com/grazianoEnzoMarchesani/Warmish-Web)**.
+
 
 ---
 
